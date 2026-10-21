@@ -1,0 +1,35 @@
+{
+  "name": "linkwatch",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm build && pnpm -r test",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "dev:master": "pnpm --filter @linkwatch/master dev",
+    "dev:worker": "pnpm --filter @linkwatch/worker dev",
+    "dev:web": "pnpm --filter @linkwatch/web dev",
+    "start": "node scripts/start.mjs",
+    "daemon": "pnpm build && pm2 startOrRestart ecosystem.config.cjs && pm2 ls",
+    "daemon:stop": "pm2 delete ecosystem.config.cjs",
+    "daemon:logs": "pm2 logs linkwatch-master",
+    "worker": "node scripts/worker.mjs",
+    "worker:daemon": "pnpm --filter @linkwatch/worker... build && pm2 startOrRestart ecosystem.worker.config.cjs && pm2 ls",
+    "worker:daemon:stop": "pm2 delete ecosystem.worker.config.cjs",
+    "worker:daemon:logs": "pm2 logs linkwatch-worker"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^24.19.2",
+    "pm2": "^7.0.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "packageManager": "pnpm@12.14.0"
+}
