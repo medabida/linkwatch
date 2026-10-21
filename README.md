@@ -30,7 +30,7 @@ On shutdown (Ctrl+C or SIGTERM) a running speed test is aborted, recorded as a f
 5. Create interfaces for that worker in **Monitoring** (pick the worker first, then one of the interfaces it reported).
 
 Development: `pnpm dev:master`, `pnpm dev:worker`, `pnpm dev:web` (Vite on :5173, proxying /api to :3000; run `pnpm build` once first so the workspace packages exist in `dist`).
-Quality: `pnpm test` (builds, then runs all Vitest suites), `pnpm lint`, `pnpm typecheck`.
+Quality: `pnpm test` (builds, then runs all Vitest suites), `pnpm lint`, `pnpm typecheck`. GitHub Actions (`.github/workflows/ci.yml`) runs lint, build, typecheck and tests on pushes to `main` and on every pull request. Requiring it to pass before merging is a branch-protection setting on GitHub and is not configured by the repo.
 The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing except `data/worker.json`.
 
 ## Implementation notes / choices made while building
@@ -42,7 +42,8 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 - Runs left as `running` by a crashed master are marked failed on the next master start.
 - The `/api/interfaces` endpoint is gone: interface lists come per worker (`GET /api/workers`).
 - `POST /api/targets` defaults the owning worker to the local worker when `workerId` is omitted.
-- Tested end to end with a fake `speedtest` binary (local worker, a paired remote worker, killing the remote worker mid-test, restarting it from the saved config); the real Ookla CLI with interface binding was verified on the dev Mac earlier (`--interface=en0`).
+- A worker cannot monitor the same binding (same type and value) twice: the API answers `409`. This is checked in the API, not by a DB constraint. The same interface on another worker, or an interface and one of its IPs, are allowed.
+- Tested end to end with a fake `speedtest` binary (local worker, a paired remote worker, killing the remote worker mid-test, restarting it from the saved config). The real Ookla CLI was not exercised by the automated tests or the end-to-end check above.
 
 ## Decisions
 
@@ -116,7 +117,7 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 - When Caddy OAuth is added, `/ws/worker` must bypass it.
 
 ### Frontend
-- Pages: **Workers** (status, last seen, machine info, Ookla status, latency/uptime, current activity, interfaces, targets with last result, add/edit/enable/disable/rotate token/remove/run now/refresh interfaces, pairing command with editable master address and a localhost warning), **History** (worker/site columns and filters), **Monitoring** (targets; pick a worker, then an interface from its reported list; configured interfaces that disappeared are flagged), status banners (local worker disconnected, remote workers offline/incompatible, Ookla missing) and live progress.
+- Pages: **Workers** (status, last seen, machine info, Ookla status, latency/uptime, current activity, interfaces, targets with last result, add/edit in dialogs, enable/disable, rotate token, remove, run now, refresh interfaces; the pairing command is shown in a dialog after creating a worker or rotating a token, with an editable master address and a localhost warning), **History** (worker/site columns and filters), **Monitoring** (targets, added and edited in a dialog; pick a worker, then an interface from its reported list; configured interfaces that disappeared are flagged), status banners (local worker disconnected, remote workers offline/incompatible, Ookla missing) and live progress.
 - Table stack: TanStack Table + TanStack Query, server-driven state kept in the URL.
 
 ## Testing
@@ -127,7 +128,8 @@ Unit tests are written alongside each piece of code, using Vitest (`pnpm test` r
 - **Supervisor:** real child processes (restart/backoff, graceful stop, SIGKILL, missing binary).
 - **Worker:** engine fixtures, and the client against a fake master speaking the real handshake (reconnect, abort on disconnect, busy rejection, idle timeout), interface watcher, config precedence and file permissions.
 - **API:** supertest on an in-memory DB, including a real worker connection for status/rotation.
-- **Frontend:** Workers, Monitoring and History pages and helpers.
+- **Frontend:** App routing, Workers, Monitoring and History pages, the status bar, the modal and the API client and helpers.
+- **Shared / DB:** schemas and formatting; migrations, pragmas, foreign keys and repositories.
 - Manual end-to-end checks with a fake `speedtest` on the PATH: pairing a real second worker process, killing it mid-test, restarting from the saved config.
 
 ## Future features (NOT in scope now; planned for later)
