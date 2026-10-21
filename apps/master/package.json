@@ -1,0 +1,27 @@
+{
+  "name": "@linkwatch/master",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/supertest": "^7.2.1",
+    "@types/ws": "^8.18.2",
+    "supertest": "^7.3.1"
+  },
+  "dependencies": {
+    "@linkwatch/db": "workspace:*",
+    "@linkwatch/protocol": "workspace:*",
+    "@linkwatch/shared": "workspace:*",
+    "express": "^5.3.0",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  }
+}
