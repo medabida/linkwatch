@@ -25,3 +25,16 @@ export const SORTABLE_RUN_COLUMNS = [
   "serverName",
   "isp",
 ] as const;
+
+/** Metrics the dashboard aggregates per time bucket. */
+export const DASHBOARD_METRICS = [
+  "downloadBps",
+  "uploadBps",
+  "pingMs",
+  "pingJitterMs",
+  "pingLowMs",
+  "pingHighMs",
+  "packetLoss",
+  "downloadLatencyIqmMs",
+  "uploadLatencyIqmMs",
+] as const;

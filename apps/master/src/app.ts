@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { REPO_ROOT, type Repos } from "@linkwatch/db";
+import { BASELINE_MS, buildDashboard, REPO_ROOT, type Repos } from "@linkwatch/db";
 import { CLOSE_DISABLED, CLOSE_REMOVED, CLOSE_TOKEN_ROTATED, formatToken, generateSecret, generateWorkerId } from "@linkwatch/protocol";
 import {
+  type DashboardDto,
+  dashboardQuerySchema,
   type HealthDto,
   type RunDetailDto,
   type RunsPage,
@@ -182,6 +184,23 @@ export function createApp({ repos, hub, dispatcher, bus, webDist = path.join(REP
     const q = runsQuerySchema.parse(req.query);
     const { rows, total } = repos.runs.list(q);
     const body: RunsPage = { rows, total, page: q.page, pageSize: q.pageSize };
+    res.json(body);
+  });
+
+  app.get("/api/dashboard", (req, res) => {
+    const q = dashboardQuerySchema.parse(req.query);
+    const fetched = repos.runs.forDashboard({ ...q, from: Math.min(q.from, q.to - BASELINE_MS), targetIds: q.targetIds });
+    const body: DashboardDto = buildDashboard(
+      {
+        from: q.from,
+        to: q.to,
+        tzOffsetMin: q.tzOffsetMin,
+        targets: repos.targets.list(),
+        workers: repos.workers.list().map((w) => ({ id: w.id, name: w.name, site: w.site })),
+        filter: { workerId: q.workerId, site: q.site, targetIds: q.targetIds },
+      },
+      fetched,
+    );
     res.json(body);
   });
 

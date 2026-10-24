@@ -81,3 +81,22 @@ export const runsQuerySchema = z.object({
 });
 
 export type RunsQuery = z.infer<typeof runsQuerySchema>;
+
+export const dashboardQuerySchema = z
+  .object({
+    from: z.coerce.number().int(),
+    to: z.coerce.number().int(),
+    workerId: z.string().min(1).optional(),
+    site: z.string().min(1).optional(),
+    targetIds: z
+      .string()
+      .optional()
+      .transform((v) => (v ? v.split(",").map(Number) : undefined))
+      .pipe(z.array(z.number().int().positive()).max(200).optional()),
+    /** Client timezone offset in minutes east of UTC (e.g. +120 for CEST), used for day and hour buckets. */
+    tzOffsetMin: z.coerce.number().int().min(-840).max(840).default(0),
+  })
+  .refine((q) => q.to > q.from, { message: "to must be after from", path: ["to"] })
+  .refine((q) => q.to - q.from <= 366 * 86_400_000, { message: "range too large", path: ["to"] });
+
+export type DashboardQuery = z.infer<typeof dashboardQuerySchema>;

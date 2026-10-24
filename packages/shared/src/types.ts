@@ -1,4 +1,4 @@
-import type { BIND_TYPES, RUN_STATUSES, RUN_TRIGGERS, WORKER_KINDS } from "./constants.js";
+import type { BIND_TYPES, DASHBOARD_METRICS, RUN_STATUSES, RUN_TRIGGERS, WORKER_KINDS } from "./constants.js";
 
 export type BindType = (typeof BIND_TYPES)[number];
 export type RunStatus = (typeof RUN_STATUSES)[number];
@@ -206,4 +206,136 @@ export function emptyMetrics(): RunMetrics {
     resultId: null,
     resultUrl: null,
   };
+}
+
+export type DashboardMetric = (typeof DASHBOARD_METRICS)[number];
+
+export interface StatBlock {
+  avg: number;
+  min: number;
+  max: number;
+  p50: number;
+  p95: number;
+}
+
+export interface DashboardTarget {
+  /** Stable series key: the target id, or `x:<worker>:<label>` for runs whose target was deleted. */
+  key: string;
+  targetId: number | null;
+  label: string;
+  workerName: string;
+  site: string;
+  bindValue: string;
+  enabled: boolean | null;
+  intervalMinutes: number | null;
+}
+
+export interface SeriesPoint {
+  key: string;
+  /** Bucket start (epoch ms). */
+  t: number;
+  /** Finished tests in the bucket (final attempt of each test only). */
+  n: number;
+  ok: number;
+  failed: number;
+  metrics: Partial<Record<DashboardMetric, StatBlock>>;
+}
+
+export interface DashboardSummary {
+  tests: number;
+  ok: number;
+  failed: number;
+  /** 0..100, null without tests. */
+  successRate: number | null;
+  downloadBps: StatBlock | null;
+  uploadBps: StatBlock | null;
+  pingMs: StatBlock | null;
+  pingJitterMs: StatBlock | null;
+  packetLoss: StatBlock | null;
+  downloadBytes: number;
+  uploadBytes: number;
+}
+
+export interface TargetComparison {
+  key: string;
+  tests: number;
+  ok: number;
+  failed: number;
+  downloadBps: StatBlock | null;
+  uploadBps: StatBlock | null;
+  pingMs: StatBlock | null;
+  downloadBytes: number;
+  uploadBytes: number;
+}
+
+export interface UsagePoint {
+  /** Day start in the client's timezone (epoch ms). */
+  t: number;
+  downloadBytes: number;
+  uploadBytes: number;
+}
+
+export interface HeatmapCell {
+  key: string;
+  /** Hour of day, 0..23, in the client's timezone. */
+  hour: number;
+  n: number;
+  downloadBps: number;
+}
+
+export interface BaselineEntry {
+  key: string;
+  latestBps: number | null;
+  latestAt: number | null;
+  /** Median successful download over the 7 days before `to`. */
+  medianBps: number | null;
+  /** (latest - median) / median * 100. */
+  deviationPct: number | null;
+}
+
+export interface HealthEntry {
+  key: string;
+  lastRunAt: number | null;
+  lastStatus: RunStatus | null;
+  lastOkAt: number | null;
+  lastError: string | null;
+  /** True when the target is enabled but has not produced a successful test for 3 intervals. */
+  stale: boolean;
+}
+
+export interface ServerStat {
+  name: string;
+  location: string | null;
+  host: string | null;
+  tests: number;
+  downloadBps: number | null;
+  uploadBps: number | null;
+  pingMs: number | null;
+}
+
+export interface IdentityChange {
+  key: string;
+  at: number;
+  externalIp: string | null;
+  isp: string | null;
+  isVpn: boolean | null;
+  /** Null for the first value seen in the range. */
+  previousExternalIp: string | null;
+  previousIsp: string | null;
+}
+
+export interface DashboardDto {
+  from: number;
+  to: number;
+  bucketMs: number;
+  targets: DashboardTarget[];
+  series: SeriesPoint[];
+  summary: DashboardSummary;
+  comparison: TargetComparison[];
+  usage: UsagePoint[];
+  heatmap: HeatmapCell[];
+  baseline: BaselineEntry[];
+  health: HealthEntry[];
+  servers: ServerStat[];
+  identity: IdentityChange[];
 }

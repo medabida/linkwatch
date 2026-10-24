@@ -1,4 +1,5 @@
 import type {
+  DashboardDto,
   HealthDto,
   RunDetailDto,
   RunsPage,
@@ -44,6 +45,15 @@ export interface RunsParams {
   to?: number;
 }
 
+export interface DashboardRequest {
+  from: number;
+  to: number;
+  workerId?: string;
+  site?: string;
+  targetIds?: number[];
+  tzOffsetMin: number;
+}
+
 export const api = {
   health: () => request<HealthDto>("/api/health"),
   workers: () => request<WorkerDto[]>("/api/workers"),
@@ -63,6 +73,13 @@ export const api = {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(p)) if (v !== undefined && v !== "") q.set(k, String(v));
     return request<RunsPage>(`/api/runs?${q}`);
+  },
+  dashboard: (p: DashboardRequest) => {
+    const q = new URLSearchParams({ from: String(p.from), to: String(p.to), tzOffsetMin: String(p.tzOffsetMin) });
+    if (p.workerId) q.set("workerId", p.workerId);
+    if (p.site) q.set("site", p.site);
+    if (p.targetIds?.length) q.set("targetIds", p.targetIds.join(","));
+    return request<DashboardDto>(`/api/dashboard?${q}`);
   },
   run: (id: number) => request<RunDetailDto>(`/api/runs/${id}`),
 };

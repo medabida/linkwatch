@@ -330,6 +330,47 @@ describe("runs", () => {
   });
 });
 
+describe("dashboard", () => {
+  it("aggregates runs and validates the query", async () => {
+    const local = repos.workers.getLocal()?.id ?? "";
+    const tg = repos.targets.create({
+      workerId: local,
+      label: "A",
+      bindType: "interface",
+      bindValue: "eth0",
+      intervalMinutes: 10,
+      timeoutSeconds: 120,
+      enabled: true,
+    });
+    const id = repos.runs.start({
+      workerId: local,
+      workerName: "Local",
+      site: "default",
+      targetId: tg.id,
+      targetLabel: "A",
+      bindType: "interface",
+      bindValue: "eth0",
+      attemptGroupId: "g",
+      attemptNumber: 1,
+      trigger: "schedule",
+      engine: "ookla",
+    });
+    repos.runs.finish(id, { status: "ok", metrics: { ...emptyMetrics(), downloadBps: 1e8, downloadBytes: 10 } });
+    const now = Date.now();
+    const res = await request(app()).get(`/api/dashboard?from=${now - 3_600_000}&to=${now + 1000}&tzOffsetMin=60`);
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toMatchObject({ tests: 1, ok: 1, downloadBytes: 10 });
+    expect(res.body.targets).toHaveLength(1);
+    expect(res.body.series[0].metrics.downloadBps.avg).toBe(1e8);
+    const other = await request(app()).get(`/api/dashboard?from=${now - 3_600_000}&to=${now + 1000}&targetIds=${tg.id + 1}`);
+    expect(other.body.summary.tests).toBe(0);
+    expect((await request(app()).get(`/api/dashboard?from=${now}&to=${now - 1}`)).status).toBe(400);
+    expect((await request(app()).get("/api/dashboard")).status).toBe(400);
+    expect((await request(app()).get(`/api/dashboard?from=0&to=${now}`)).status).toBe(400);
+    expect((await request(app()).get(`/api/dashboard?from=${now - 1000}&to=${now}&targetIds=a`)).status).toBe(400);
+  });
+});
+
 describe("health & interfaces", () => {
   it("reports worker down and no engine before the local worker ever connected", async () => {
     const res = await request(app()).get("/api/health");

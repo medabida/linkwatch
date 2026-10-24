@@ -9,8 +9,9 @@ import {
   type TargetInput,
   type WorkerKind,
 } from "@linkwatch/shared";
-import { and, asc, desc, eq, getTableColumns, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
+import { DASHBOARD_ROW_FIELDS, type DashboardRow } from "./dashboard.js";
 import { runs, targets, type WorkerInfo, workers } from "./schema.js";
 
 type Clock = () => number;
@@ -185,6 +186,26 @@ export function createRepos(db: Db, now: Clock = Date.now) {
         .all();
       const total = db.select({ n: sql<number>`count(*)` }).from(runs).where(where).get()?.n ?? 0;
       return { rows, total };
+    },
+    /** Finished runs (narrow columns) in a time range, for dashboard aggregation. */
+    forDashboard(f: { from: number; to: number; workerId?: string; site?: string; targetIds?: number[] }): DashboardRow[] {
+      const cols = Object.fromEntries(DASHBOARD_ROW_FIELDS.map((k) => [k, runs[k]])) as {
+        [K in (typeof DASHBOARD_ROW_FIELDS)[number]]: (typeof runs)[K];
+      };
+      const conds = [
+        ne(runs.status, "running"),
+        gte(runs.startedAt, f.from),
+        lte(runs.startedAt, f.to),
+        f.workerId ? eq(runs.workerId, f.workerId) : undefined,
+        f.site ? eq(runs.site, f.site) : undefined,
+        f.targetIds?.length ? inArray(runs.targetId, f.targetIds) : undefined,
+      ].filter((c) => c !== undefined);
+      return db
+        .select(cols)
+        .from(runs)
+        .where(and(...conds))
+        .orderBy(asc(runs.startedAt))
+        .all() as DashboardRow[];
     },
     get(id: number): (RunDto & { rawJson: string | null }) | undefined {
       return db.select().from(runs).where(eq(runs.id, id)).get();
