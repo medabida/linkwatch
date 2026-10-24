@@ -155,3 +155,12 @@ describe("workers", () => {
     expect(repos.runs.list(q({ site: "default" })).total).toBe(1);
   });
 });
+
+describe("settings", () => {
+  it("defaults to the pre-settings behaviour and persists partial updates", () => {
+    expect(repos.settings.get()).toEqual({ parallelSites: true, parallelInterfaces: false });
+    expect(repos.settings.update({ parallelInterfaces: true })).toEqual({ parallelSites: true, parallelInterfaces: true });
+    expect(repos.settings.update({ parallelSites: false })).toEqual({ parallelSites: false, parallelInterfaces: true });
+    expect(repos.settings.get()).toEqual({ parallelSites: false, parallelInterfaces: true });
+  });
+});

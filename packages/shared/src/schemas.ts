@@ -100,3 +100,10 @@ export const dashboardQuerySchema = z
   .refine((q) => q.to - q.from <= 366 * 86_400_000, { message: "range too large", path: ["to"] });
 
 export type DashboardQuery = z.infer<typeof dashboardQuerySchema>;
+
+export const settingsUpdateSchema = z
+  .object({ parallelSites: z.boolean().optional(), parallelInterfaces: z.boolean().optional() })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: "Nothing to update" });
+
+export type SettingsUpdate = z.infer<typeof settingsUpdateSchema>;

@@ -339,3 +339,11 @@ export interface DashboardDto {
   servers: ServerStat[];
   identity: IdentityChange[];
 }
+
+/** Scheduling switches, editable on the Settings page. */
+export interface SettingsDto {
+  /** Different sites may test at the same time. When off, only one site is active at a time. */
+  parallelSites: boolean;
+  /** Interfaces of different workers in the same site may test at the same time. A worker still runs one test at a time. */
+  parallelInterfaces: boolean;
+}

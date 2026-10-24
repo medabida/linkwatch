@@ -38,3 +38,6 @@ export const DASHBOARD_METRICS = [
   "downloadLatencyIqmMs",
   "uploadLatencyIqmMs",
 ] as const;
+
+/** First-start values: the behaviour before the settings existed (one test at a time per site, sites in parallel). */
+export const DEFAULT_SETTINGS = { parallelSites: true, parallelInterfaces: false } as const;

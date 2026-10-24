@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Repos } from "@linkwatch/db";
 import type { TestFailureKind } from "@linkwatch/protocol";
-import { DEFAULT_SITE, MAX_ATTEMPTS, type RunTrigger, type TargetDto, type WorkerActivity } from "@linkwatch/shared";
+import { DEFAULT_SITE, MAX_ATTEMPTS, type RunTrigger, type SettingsDto, type TargetDto, type WorkerActivity } from "@linkwatch/shared";
 import type { EventBus } from "./events.js";
 import { failureText, type WorkerHub } from "./hub.js";
 
@@ -16,39 +16,38 @@ export interface DispatcherDeps {
 interface QueueItem {
   targetId: number;
   trigger: RunTrigger;
+  workerId: string;
+  site: string;
 }
 
-interface SiteQueue {
-  items: QueueItem[];
-  runningTargetId: number | null;
-  processing: Promise<void> | null;
+interface RunningTest {
+  workerId: string;
+  site: string;
+  done: Promise<void>;
 }
 
 const MAX_STORED_OUTPUT = 20_000;
 const RETRYABLE: ReadonlySet<TestFailureKind> = new Set(["failed", "timeout"]);
 
 /**
- * Per-target interval timers feeding one serial queue per SITE: workers in the same site never
- * test at the same time, different sites run in parallel.
+ * Per-target interval timers feeding one FIFO queue. What may run at the same time follows the settings:
+ *  - a worker never runs two tests at once;
+ *  - without `parallelSites`, only one site is active at a time;
+ *  - without `parallelInterfaces`, a site runs one test at a time (otherwise its workers may overlap).
+ * A queued test that is blocked does not hold back tests it does not conflict with, but never gets overtaken
+ * by a later test that does (so nothing starves).
  */
 export function createDispatcher({ repos, hub, bus, newId = randomUUID, log = () => {} }: DispatcherDeps) {
   const targets = new Map<number, TargetDto>();
   const timers = new Map<number, NodeJS.Timeout>();
-  const sites = new Map<string, SiteQueue>();
-  const targetSite = new Map<number, string>();
+  const queue: QueueItem[] = [];
+  const running = new Map<number, RunningTest>();
   const activities = new Map<string, WorkerActivity>();
   /** targets whose first ("startup") run waits for their worker to connect */
   const awaitingStartup = new Set<number>();
   const abort = new AbortController();
   let stopped = false;
 
-  const siteQueue = (site: string): SiteQueue => {
-    const existing = sites.get(site);
-    if (existing) return existing;
-    const q: SiteQueue = { items: [], runningTargetId: null, processing: null };
-    sites.set(site, q);
-    return q;
-  };
   const siteOf = (t: TargetDto) => repos.workers.get(t.workerId)?.site ?? DEFAULT_SITE;
 
   function isActive(t: TargetDto): boolean {
@@ -56,39 +55,58 @@ export function createDispatcher({ repos, hub, bus, newId = randomUUID, log = ()
     return !!w?.enabled;
   }
 
+  /** True when `a` and `b` must not run at the same time under the current settings. */
+  function conflicts(a: { workerId: string; site: string }, b: { workerId: string; site: string }, cfg: SettingsDto): boolean {
+    if (a.workerId === b.workerId) return true;
+    if (a.site === b.site) return !cfg.parallelInterfaces;
+    return !cfg.parallelSites;
+  }
+
   function enqueue(targetId: number, trigger: RunTrigger): boolean {
     if (stopped) return false;
     const target = targets.get(targetId);
     if (!target || !isActive(target)) return false;
-    const site = siteOf(target);
-    const q = siteQueue(site);
-    if (q.runningTargetId === targetId || q.items.some((i) => i.targetId === targetId)) return false;
-    q.items.push({ targetId, trigger });
-    targetSite.set(targetId, site);
+    if (running.has(targetId) || queue.some((i) => i.targetId === targetId)) return false;
+    queue.push({ targetId, trigger, workerId: target.workerId, site: siteOf(target) });
     bus.emit({ type: "run_queued", runId: null, targetId, payload: { label: target.label, workerId: target.workerId } });
-    q.processing ??= drain(q);
+    pump();
     return true;
   }
 
-  async function drain(q: SiteQueue): Promise<void> {
-    try {
-      while (q.items.length > 0 && !stopped) {
-        const item = q.items.shift();
-        const target = item && targets.get(item.targetId);
-        if (!item || !target) continue;
-        q.runningTargetId = target.id;
-        try {
-          await runTarget(target, item.trigger);
-        } catch (e) {
-          log(`[${target.label}] unexpected dispatcher error: ${e instanceof Error ? e.message : e}`);
-        } finally {
-          q.runningTargetId = null;
-          activities.delete(target.workerId);
-        }
+  /** Starts every queued test that is allowed to run now. Called on enqueue, on completion and when settings change. */
+  function pump(): void {
+    if (stopped) return;
+    const cfg = repos.settings.get();
+    const skipped: QueueItem[] = [];
+    for (let i = 0; i < queue.length; ) {
+      const item = queue[i] as QueueItem;
+      const blocked = [...running.values()].some((r) => conflicts(item, r, cfg)) || skipped.some((s) => conflicts(item, s, cfg));
+      if (blocked) {
+        skipped.push(item);
+        i++;
+        continue;
       }
-    } finally {
-      q.processing = null;
+      queue.splice(i, 1);
+      start(item);
     }
+  }
+
+  function start(item: QueueItem): void {
+    const target = targets.get(item.targetId);
+    if (!target) return;
+    const entry: RunningTest = { workerId: item.workerId, site: item.site, done: Promise.resolve() };
+    entry.done = (async () => {
+      try {
+        await runTarget(target, item.trigger);
+      } catch (e) {
+        log(`[${target.label}] unexpected dispatcher error: ${e instanceof Error ? e.message : e}`);
+      } finally {
+        running.delete(target.id);
+        activities.delete(target.workerId);
+        pump();
+      }
+    })();
+    running.set(target.id, entry);
   }
 
   /** One target: up to MAX_ATTEMPTS immediate attempts (only for failed/timeout), one stored run per attempt. */
@@ -201,13 +219,12 @@ export function createDispatcher({ repos, hub, bus, newId = randomUUID, log = ()
       clearTimer(id);
       awaitingStartup.delete(id);
     }
-    for (const q of sites.values()) {
-      for (let i = q.items.length - 1; i >= 0; i--) {
-        const item = q.items[i];
-        const t = item && targets.get(item.targetId);
-        if (item && (!t?.enabled || !isActive(t)) && item.trigger !== "manual") q.items.splice(i, 1);
-      }
+    for (let i = queue.length - 1; i >= 0; i--) {
+      const item = queue[i];
+      const t = item && targets.get(item.targetId);
+      if (item && (!t?.enabled || !isActive(t)) && item.trigger !== "manual") queue.splice(i, 1);
     }
+    pump();
   }
 
   const offConnected = hub.onConnected((workerId) => {
@@ -230,8 +247,8 @@ export function createDispatcher({ repos, hub, bus, newId = randomUUID, log = ()
     offConnected();
     abort.abort();
     for (const id of [...timers.keys()]) clearTimer(id);
-    for (const q of sites.values()) q.items.length = 0;
-    await Promise.all([...sites.values()].map((q) => q.processing));
+    queue.length = 0;
+    await Promise.all([...running.values()].map((r) => r.done));
   }
 
   return {
@@ -240,10 +257,17 @@ export function createDispatcher({ repos, hub, bus, newId = randomUUID, log = ()
     stop,
     activityOf: (workerId: string): WorkerActivity | null => activities.get(workerId) ?? null,
     whenIdle: async () => {
-      for (const q of sites.values()) while (q.processing) await q.processing;
+      while (running.size > 0) await Promise.all([...running.values()].map((r) => r.done));
     },
+    /** Per site: the first running target (null if none), all running targets and the queued ones. */
     get state() {
-      return Object.fromEntries([...sites].map(([s, q]) => [s, { running: q.runningTargetId, queued: q.items.map((i) => i.targetId) }]));
+      const sites = new Set([...running.values()].map((r) => r.site).concat(queue.map((i) => i.site)));
+      return Object.fromEntries(
+        [...sites].map((site) => {
+          const ids = [...running].filter(([, r]) => r.site === site).map(([id]) => id);
+          return [site, { running: ids[0] ?? null, runningAll: ids, queued: queue.filter((i) => i.site === site).map((i) => i.targetId) }];
+        }),
+      );
     },
   };
 }

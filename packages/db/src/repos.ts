@@ -1,9 +1,12 @@
 import {
+  DEFAULT_SETTINGS,
   DEFAULT_SITE,
   type NetworkInterfaceDto,
   type RunDto,
   type RunMetrics,
   type RunsQuery,
+  type SettingsDto,
+  type SettingsUpdate,
   type TargetCreateInput,
   type TargetDto,
   type TargetInput,
@@ -12,7 +15,7 @@ import {
 import { and, asc, desc, eq, getTableColumns, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { DASHBOARD_ROW_FIELDS, type DashboardRow } from "./dashboard.js";
-import { runs, targets, type WorkerInfo, workers } from "./schema.js";
+import { runs, settings, targets, type WorkerInfo, workers } from "./schema.js";
 
 type Clock = () => number;
 
@@ -212,10 +215,29 @@ export function createRepos(db: Db, now: Clock = Date.now) {
     },
   };
 
+  const settingsRepo = {
+    /** Stored values over the defaults; anything missing or of the wrong type falls back to its default. */
+    get(): SettingsDto {
+      const out: SettingsDto = { ...DEFAULT_SETTINGS };
+      for (const row of db.select().from(settings).all()) {
+        if ((row.key === "parallelSites" || row.key === "parallelInterfaces") && typeof row.value === "boolean") out[row.key] = row.value;
+      }
+      return out;
+    },
+    update(patch: SettingsUpdate): SettingsDto {
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) continue;
+        db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } }).run();
+      }
+      return settingsRepo.get();
+    },
+  };
+
   return {
     workers: workersRepo,
     targets: targetsRepo,
     runs: runsRepo,
+    settings: settingsRepo,
   };
 }
 

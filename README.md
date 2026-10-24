@@ -76,7 +76,7 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 | Ookla install | **User installs it** on each worker machine; the worker detects it and reports status/install hint to the master |
 | Server selection | Ookla auto-picks the server (pinning may come later) |
 | Interfaces | Per worker; chosen from the worker's reported interface list (or typed manually). Binding by interface name or source IP; **relies on OS routing**, the app never creates or manages VLANs/routes |
-| Concurrency | One test at a time **per site** (workers in the same site share an uplink); different sites run in parallel. Default site is `default`, i.e. strictly serial |
+| Concurrency | Two switches on the **Settings** page. **Parallel sites** (default on): different sites test at the same time; off means one site is active at a time. **Parallel interfaces** (default off): interfaces of different workers in the same site test at the same time; off means a site runs one test at a time. A worker never runs two tests at once. The defaults keep the original behaviour: one test at a time per site (workers in a site share an uplink), sites in parallel. Default site is `default`, i.e. strictly serial |
 | Schedule | Fixed interval in minutes, **configured per interface** |
 | Failures | Stored as runs with status and error (a failure likely means that link has no internet, which is valuable to see) |
 | Timeout | Default 120s per test, configurable per interface |
@@ -106,7 +106,7 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 
 ### Master (`apps/master`)
 - `hub.ts`: WebSocket server (upgrade on `/ws/worker`), mutual HMAC handshake, one live connection per worker, ping/pong liveness, `runTest()` with a watchdog, status computation (`online`, `reconnecting` for up to 10s, `offline`, `waiting`, `disabled`, `incompatible`).
-- `dispatcher.ts`: per-target timers feeding one serial queue per site, run persistence, retry rules, per-worker activity.
+- `dispatcher.ts`: per-target timers feeding one FIFO queue that starts every test the concurrency settings allow (a blocked test never gets overtaken by a conflicting later one), run persistence, retry rules, per-worker activity.
 - `supervisor.ts`: spawns and supervises the local worker child process (restart with backoff, SIGTERM then SIGKILL on stop). The local worker is auto-provisioned, cannot be deleted or have its token rotated, only disabled.
 - `events.ts`: in-process event bus. `app.ts`: REST API (`/api/workers`, `/api/targets`, `/api/runs`, `/api/events`, `/api/health`). `workers.ts`: worker DTO builder.
 
@@ -119,6 +119,7 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 ### Data model
 - `workers`: id, name (unique), site, kind (`local` | `remote`), secret, enabled, created_at, last_seen_at, last_connected_at, info (machine + engine status, JSON), interfaces (JSON) + updated_at
 - `targets`: id, worker_id (cascade delete), label, bind_type, bind_value, interval_minutes (>= 5), timeout_seconds, enabled, created_at, updated_at
+- `settings`: key, value (JSON). `parallelSites` and `parallelInterfaces`; missing keys fall back to the defaults
 - `runs`: id, worker_id (set null on delete) + worker_name/site snapshots, target_id (set null) + label/binding snapshots, attempt_group_id, attempt_number, trigger, status (`running` | `ok` | `failed` | `timeout`), engine, timings, every metric the engine reports, error_message, exit_code, stderr, `raw_json`
 
 ### Cluster protocol (JSON over WebSocket, validated with zod in `packages/protocol`)
@@ -134,14 +135,14 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 - When Caddy OAuth is added, `/ws/worker` must bypass it.
 
 ### Frontend
-- Pages: **Workers** (status, last seen, machine info, Ookla status, latency/uptime, current activity, interfaces, targets with last result, add/edit in dialogs, enable/disable, rotate token, remove, run now, refresh interfaces; the pairing command is shown in a dialog after creating a worker or rotating a token, with an editable master address and a localhost warning), **History** (worker/site columns and filters), **Monitoring** (targets, added and edited in a dialog; pick a worker, then an interface from its reported list; configured interfaces that disappeared are flagged), status banners (local worker disconnected, remote workers offline/incompatible, Ookla missing) and live progress.
+- Pages: **Workers** (status, last seen, machine info, Ookla status, latency/uptime, current activity, interfaces, targets with last result, add/edit in dialogs, enable/disable, rotate token, remove, run now, refresh interfaces; the pairing command is shown in a dialog after creating a worker or rotating a token, with an editable master address and a localhost warning), **History** (worker/site columns and filters), **Settings** (the two scheduling switches, saved immediately; `GET`/`PATCH /api/settings`), **Monitoring** (targets, added and edited in a dialog; pick a worker, then an interface from its reported list; configured interfaces that disappeared are flagged), status banners (local worker disconnected, remote workers offline/incompatible, Ookla missing) and live progress.
 - Table stack: TanStack Table + TanStack Query, server-driven state kept in the URL.
 
 ## Testing
 Unit tests are written alongside each piece of code, using Vitest (`pnpm test` runs everything).
 - **Protocol:** schema validation and handshake proofs (valid, wrong secret, reflection, replay, tampering).
 - **Hub:** real WebSocket connections against a hand-rolled protocol client: handshake accept/reject (bad secret, unknown id, incompatible, disabled), throttling, duplicate replacement, ping/pong and pong timeout, status transitions, dispatch/progress/result/failure, lost connection, watchdog, abort, token rotation.
-- **Dispatcher:** fake timers and a fake hub: startup behaviour, intervals, per-site serialisation, retry rules per failure kind, offline runs, shutdown abort.
+- **Dispatcher:** fake timers and a fake hub: startup behaviour, intervals, concurrency settings (sites, interfaces, one test per worker, no starvation, live changes), retry rules per failure kind, offline runs, shutdown abort.
 - **Supervisor:** real child processes (restart/backoff, graceful stop, SIGKILL, missing binary).
 - **Worker:** engine fixtures, and the client against a fake master speaking the real handshake (reconnect, abort on disconnect, busy rejection, idle timeout), interface watcher, config precedence and file permissions.
 - **API:** supertest on an in-memory DB, including a real worker connection for status/rotation.

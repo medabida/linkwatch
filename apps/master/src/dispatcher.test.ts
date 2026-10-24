@@ -212,6 +212,133 @@ describe("serialisation per site", () => {
   });
 });
 
+describe("concurrency settings", () => {
+  const gate = () => {
+    const open: Array<() => void> = [];
+    runTest.mockImplementation(() => new Promise<TestOutcome>((res) => open.push(() => res(OK))));
+    return open;
+  };
+  const labels = () => runTest.mock.calls.map(([r]) => r.target.bindValue);
+  const go = async () => {
+    dispatcher.reload();
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  const release = async (open: Array<() => void>, i: number) => {
+    open[i]?.();
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  const setup = () => {
+    addWorker("w1", "home");
+    addWorker("w2", "home");
+    addWorker("w3", "office");
+    connected.add("w1").add("w2").add("w3");
+  };
+
+  it("lets interfaces of different workers in a site overlap when parallel interfaces is on", async () => {
+    setup();
+    repos.settings.update({ parallelInterfaces: true });
+    addTarget("w1", "A");
+    addTarget("w2", "B");
+    const open = gate();
+    await go();
+    expect(labels()).toEqual(["A", "B"]);
+    for (const o of open) o();
+    await settle();
+  });
+
+  it("still never runs two tests on one worker, even with everything parallel", async () => {
+    setup();
+    repos.settings.update({ parallelInterfaces: true, parallelSites: true });
+    addTarget("w1", "A");
+    addTarget("w1", "B");
+    addTarget("w3", "C");
+    const open = gate();
+    await go();
+    expect(labels()).toEqual(["A", "C"]);
+    await release(open, 0);
+    expect(labels()).toEqual(["A", "C", "B"]);
+    for (const o of open) o();
+    await settle();
+  });
+
+  it("runs one site at a time when parallel sites is off", async () => {
+    setup();
+    repos.settings.update({ parallelSites: false });
+    addTarget("w1", "A");
+    addTarget("w3", "C");
+    const open = gate();
+    await go();
+    expect(labels()).toEqual(["A"]);
+    expect(dispatcher.state.office).toMatchObject({ running: null, queued: [2] });
+    await release(open, 0);
+    expect(labels()).toEqual(["A", "C"]);
+    for (const o of open) o();
+    await settle();
+  });
+
+  it("is fully serial with both switches off", async () => {
+    setup();
+    repos.settings.update({ parallelSites: false, parallelInterfaces: false });
+    addTarget("w1", "A");
+    addTarget("w2", "B");
+    addTarget("w3", "C");
+    const open = gate();
+    await go();
+    expect(labels()).toEqual(["A"]);
+    await release(open, 0);
+    expect(labels()).toEqual(["A", "B"]);
+    await release(open, 1);
+    expect(labels()).toEqual(["A", "B", "C"]);
+    for (const o of open) o();
+    await settle();
+  });
+
+  it("overlaps interfaces inside the active site but does not let a later test starve another site", async () => {
+    setup();
+    repos.settings.update({ parallelSites: false, parallelInterfaces: true });
+    addWorker("w4", "home");
+    connected.add("w4");
+    addTarget("w1", "A1");
+    addTarget("w3", "B1");
+    addTarget("w2", "A2");
+    const open = gate();
+    await go();
+    expect(labels()).toEqual(["A1"]);
+    await release(open, 0);
+    expect(labels()).toEqual(["A1", "B1"]);
+    await release(open, 1);
+    expect(labels()).toEqual(["A1", "B1", "A2"]);
+    for (const o of open) o();
+    await settle();
+  });
+
+  it("applies a settings change to waiting tests on the next reload", async () => {
+    setup();
+    addTarget("w1", "A");
+    addTarget("w2", "B");
+    const open = gate();
+    await go();
+    expect(labels()).toEqual(["A"]);
+    repos.settings.update({ parallelInterfaces: true });
+    await go();
+    expect(labels()).toEqual(["A", "B"]);
+    for (const o of open) o();
+    await settle();
+  });
+
+  it("reports every running target of a site in state", async () => {
+    setup();
+    repos.settings.update({ parallelInterfaces: true });
+    addTarget("w1", "A");
+    addTarget("w2", "B");
+    const open = gate();
+    await go();
+    expect(dispatcher.state.home).toMatchObject({ running: 1, runningAll: [1, 2], queued: [] });
+    for (const o of open) o();
+    await settle();
+  });
+});
+
 describe("retries and failures", () => {
   const setup = () => {
     addWorker("w1");

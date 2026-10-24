@@ -10,6 +10,8 @@ import {
   type RunsPage,
   runNowSchema,
   runsQuerySchema,
+  type SettingsDto,
+  settingsUpdateSchema,
   targetInputSchema,
   type WorkerDto,
   type WorkerTokenDto,
@@ -184,6 +186,17 @@ export function createApp({ repos, hub, dispatcher, bus, webDist = path.join(REP
     const q = runsQuerySchema.parse(req.query);
     const { rows, total } = repos.runs.list(q);
     const body: RunsPage = { rows, total, page: q.page, pageSize: q.pageSize };
+    res.json(body);
+  });
+
+  app.get("/api/settings", (_req, res) => {
+    const body: SettingsDto = repos.settings.get();
+    res.json(body);
+  });
+
+  app.patch("/api/settings", (req, res) => {
+    const body: SettingsDto = repos.settings.update(settingsUpdateSchema.parse(req.body ?? {}));
+    dispatcher.reload();
     res.json(body);
   });
 

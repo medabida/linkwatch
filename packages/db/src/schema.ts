@@ -16,6 +16,11 @@ export const workers = sqliteTable("workers", {
   interfacesUpdatedAt: integer("interfaces_updated_at"),
 });
 
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value", { mode: "json" }).notNull().$type<unknown>(),
+});
+
 export type WorkerInfo = WorkerMachineInfo & { engine: EngineStatus };
 
 export const targets = sqliteTable("targets", {

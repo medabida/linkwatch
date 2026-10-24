@@ -3,6 +3,8 @@ import type {
   HealthDto,
   RunDetailDto,
   RunsPage,
+  SettingsDto,
+  SettingsUpdate,
   TargetCreateInput,
   TargetDto,
   WorkerCreateInput,
@@ -81,5 +83,7 @@ export const api = {
     if (p.targetIds?.length) q.set("targetIds", p.targetIds.join(","));
     return request<DashboardDto>(`/api/dashboard?${q}`);
   },
+  settings: () => request<SettingsDto>("/api/settings"),
+  updateSettings: (patch: SettingsUpdate) => request<SettingsDto>("/api/settings", { method: "PATCH", body: JSON.stringify(patch) }),
   run: (id: number) => request<RunDetailDto>(`/api/runs/${id}`),
 };

@@ -330,6 +330,28 @@ describe("runs", () => {
   });
 });
 
+describe("settings", () => {
+  it("returns the defaults, updates partially and reloads the dispatcher", async () => {
+    expect((await request(app()).get("/api/settings")).body).toEqual({ parallelSites: true, parallelInterfaces: false });
+    const before = reloads;
+    const res = await request(app()).patch("/api/settings").send({ parallelInterfaces: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ parallelSites: true, parallelInterfaces: true });
+    expect(reloads).toBe(before + 1);
+    expect((await request(app()).patch("/api/settings").send({ parallelSites: false })).body).toEqual({
+      parallelSites: false,
+      parallelInterfaces: true,
+    });
+    expect((await request(app()).get("/api/settings")).body).toEqual({ parallelSites: false, parallelInterfaces: true });
+  });
+
+  it("rejects empty, unknown and non-boolean updates", async () => {
+    expect((await request(app()).patch("/api/settings").send({})).status).toBe(400);
+    expect((await request(app()).patch("/api/settings").send({ nope: true })).status).toBe(400);
+    expect((await request(app()).patch("/api/settings").send({ parallelSites: "yes" })).status).toBe(400);
+  });
+});
+
 describe("dashboard", () => {
   it("aggregates runs and validates the query", async () => {
     const local = repos.workers.getLocal()?.id ?? "";

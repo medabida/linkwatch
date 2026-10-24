@@ -37,6 +37,7 @@ const routes = {
   "GET /api/targets": () => [],
   "GET /api/runs": () => ({ rows: [], total: 0, page: 1, pageSize: 25 }),
   "GET /api/dashboard": () => emptyDashboard,
+  "GET /api/settings": () => ({ parallelSites: true, parallelInterfaces: false }),
 };
 
 afterEach(() => vi.unstubAllGlobals());
@@ -46,8 +47,8 @@ describe("App", () => {
     mockApi(routes);
     renderWithProviders(<App />, "/history");
     expect(screen.getByText("LinkWatch")).toBeInTheDocument();
-    for (const name of ["Home", "History", "Workers", "Monitoring"]) expect(screen.getByRole("link", { name })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+    for (const name of ["Home", "History", "Workers", "Monitoring", "Settings"])
+      expect(screen.getByRole("link", { name })).toBeInTheDocument();
   });
 
   it.each([
@@ -55,15 +56,16 @@ describe("App", () => {
     ["/history", "History"],
     ["/workers", "Workers"],
     ["/monitoring", "Monitoring"],
+    ["/settings", "Settings"],
   ])("renders %s", async (route, heading) => {
     mockApi(routes);
     renderWithProviders(<App />, route);
     expect(await screen.findByRole("heading", { level: 1, name: heading })).toBeInTheDocument();
   });
 
-  it("redirects unknown routes (including the old /settings) to Home", async () => {
+  it("redirects unknown routes to Home", async () => {
     mockApi(routes);
-    renderWithProviders(<App />, "/settings");
+    renderWithProviders(<App />, "/nope");
     expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
   });
 });
