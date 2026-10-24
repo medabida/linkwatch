@@ -94,7 +94,6 @@ describe("HomePage", () => {
       "Reliability",
       "Packet loss",
       "Outage timeline",
-      "Download by hour of day",
       "Data usage",
     ]) {
       expect(screen.getByRole("region", { name: title })).toBeInTheDocument();
@@ -112,25 +111,18 @@ describe("HomePage", () => {
     expect(health.getByText(/Network is unreachable/)).toBeInTheDocument();
   });
 
-  it("renders the outage timeline states and the heatmap cell", async () => {
+  it("renders the outage timeline states", async () => {
     mockApi(routes());
     renderWithProviders(<HomePage />, "/");
     const timeline = await screen.findByRole("region", { name: "Outage timeline" });
     expect(timeline.querySelectorAll(".tl-ok")).toHaveLength(1);
     expect(timeline.querySelectorAll(".tl-down")).toHaveLength(1);
-    const heat = screen.getByRole("region", { name: "Download by hour of day" });
-    expect(
-      within(heat)
-        .getAllByRole("cell")
-        .some((c) => c.getAttribute("title")?.includes("200.00 Mbps")),
-    ).toBe(true);
   });
 
-  it("lists servers and identity changes", async () => {
+  it("lists identity changes", async () => {
     mockApi(routes());
     renderWithProviders(<HomePage />, "/");
-    expect(await screen.findByText("Sewan")).toBeInTheDocument();
-    expect(screen.getByText("1.2.3.4")).toBeInTheDocument();
+    expect(await screen.findByText("1.2.3.4")).toBeInTheDocument();
     expect(screen.getByText("first seen")).toBeInTheDocument();
   });
 

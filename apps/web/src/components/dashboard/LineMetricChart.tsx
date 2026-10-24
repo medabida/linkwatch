@@ -63,9 +63,10 @@ export function LineMetricChart({ title, hint, data, targets, colors, unit, deci
                 dataKey={t.key}
                 name={targetName(t, targets)}
                 stroke={colors[t.key]}
-                dot={false}
+                dot={{ r: 3, strokeWidth: 0, fill: colors[t.key] }}
+                activeDot={{ r: 5 }}
                 strokeWidth={2}
-                connectNulls={false}
+                connectNulls
                 isAnimationActive={false}
               />
             ))}
@@ -79,7 +80,7 @@ export function LineMetricChart({ title, hint, data, targets, colors, unit, deci
                   strokeDasharray="4 4"
                   strokeOpacity={0.55}
                   dot={false}
-                  connectNulls={false}
+                  connectNulls
                   isAnimationActive={false}
                 />
               ))}

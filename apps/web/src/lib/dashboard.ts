@@ -11,7 +11,7 @@ export const RANGES = [
   { id: "7d", label: "7 days", ms: 7 * DAY },
   { id: "30d", label: "30 days", ms: 30 * DAY },
 ] as const;
-export const DEFAULT_RANGE = "24h";
+export const DEFAULT_RANGE = "7d";
 
 export type StatKey = keyof StatBlock;
 export const STATS: { id: StatKey; label: string }[] = [

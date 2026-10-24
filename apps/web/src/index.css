@@ -661,14 +661,23 @@ table.dash-table th {
 }
 .timeline-cells {
   flex: 1;
-  display: flex;
-  gap: 1px;
-}
-.tl {
-  flex: 1;
+  position: relative;
   height: 22px;
-  min-width: 1px;
-  background: var(--border);
+  background: linear-gradient(var(--border), var(--border)) center / 100% 2px no-repeat;
+}
+.tl-dot {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+}
+.timeline-axis {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
 }
 .tl-ok {
   background: var(--ok);

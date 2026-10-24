@@ -3,10 +3,9 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ComparisonChart, ReliabilityChart, type ReliabilityRow, UsageChart } from "../components/dashboard/BarCharts.js";
-import { Heatmap } from "../components/dashboard/Heatmap.js";
 import { Kpis } from "../components/dashboard/Kpis.js";
 import { LineMetricChart } from "../components/dashboard/LineMetricChart.js";
-import { BaselinePanel, HealthPanel, IdentityPanel, ServersPanel } from "../components/dashboard/Tables.js";
+import { BaselinePanel, HealthPanel, IdentityPanel } from "../components/dashboard/Tables.js";
 import { OutageTimeline } from "../components/dashboard/Timeline.js";
 import { api } from "../lib/api.js";
 import {
@@ -195,11 +194,9 @@ export function HomePage() {
             <ReliabilityChart data={view.reliability} tick={view.tick} />
             <LineMetricChart title="Packet loss" hint={statLabel} data={view.loss} unit="%" decimals={2} {...lineProps(view.active)} />
 
-            <OutageTimeline targets={d.targets} series={d.series} grid={view.grid} />
+            <OutageTimeline targets={d.targets} series={d.series} from={d.from} to={d.to} />
             <ComparisonChart targets={view.active} comparison={d.comparison} stat={params.stat} />
-            <Heatmap targets={d.targets} cells={d.heatmap} />
             <UsageChart data={d.usage} />
-            <ServersPanel servers={d.servers} />
             <IdentityPanel targets={d.targets} changes={d.identity} />
           </div>
         </div>

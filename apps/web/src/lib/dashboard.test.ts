@@ -7,11 +7,11 @@ const point = (key: string, t: number, v: number): SeriesPoint => ({ key, t, n: 
 
 describe("paramsFromUrl", () => {
   const now = Date.UTC(2026, 0, 1, 12, 0, 30);
-  it("defaults to the last 24 hours, rounded up to the minute", () => {
+  it("defaults to the last 7 days, rounded up to the minute", () => {
     const p = paramsFromUrl(new URLSearchParams(), now);
-    expect(p).toMatchObject({ range: "24h", stat: "avg", compare: false });
+    expect(p).toMatchObject({ range: "7d", stat: "avg", compare: false });
     expect(p.to).toBe(Date.UTC(2026, 0, 1, 12, 1));
-    expect(p.to - p.from).toBe(86_400_000);
+    expect(p.to - p.from).toBe(7 * 86_400_000);
   });
 
   it("reads presets, filters, stat and compare", () => {
@@ -26,8 +26,8 @@ describe("paramsFromUrl", () => {
       from: 1000,
       to: 5000,
     });
-    expect(paramsFromUrl(new URLSearchParams("range=custom&from=5000&to=1000"), now).range).toBe("24h");
-    expect(paramsFromUrl(new URLSearchParams("range=bogus&stat=nope"), now)).toMatchObject({ range: "24h", stat: "avg" });
+    expect(paramsFromUrl(new URLSearchParams("range=custom&from=5000&to=1000"), now).range).toBe("7d");
+    expect(paramsFromUrl(new URLSearchParams("range=bogus&stat=nope"), now)).toMatchObject({ range: "7d", stat: "avg" });
   });
 });
 

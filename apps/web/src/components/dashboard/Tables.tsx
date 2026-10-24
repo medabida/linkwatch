@@ -1,13 +1,6 @@
-import {
-  type BaselineEntry,
-  type DashboardTarget,
-  formatBps,
-  type HealthEntry,
-  type IdentityChange,
-  type ServerStat,
-} from "@linkwatch/shared";
+import { type BaselineEntry, type DashboardTarget, formatBps, type HealthEntry, type IdentityChange } from "@linkwatch/shared";
 import { relativeTime, targetName } from "../../lib/dashboard.js";
-import { dateTime, ms } from "../../lib/format.js";
+import { dateTime } from "../../lib/format.js";
 import { Card, Empty } from "./Card.js";
 
 const label = (key: string, targets: DashboardTarget[]) => {
@@ -88,41 +81,6 @@ export function HealthPanel({ targets, health }: { targets: DashboardTarget[]; h
                   )}
                   {h.lastError && <small className="error-text"> {h.lastError.slice(0, 60)}</small>}
                 </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </Card>
-  );
-}
-
-export function ServersPanel({ servers }: { servers: ServerStat[] }) {
-  return (
-    <Card title="Test server impact" hint="average per Ookla server, to tell a slow line from a slow server">
-      {servers.length === 0 ? (
-        <Empty />
-      ) : (
-        <table className="dash-table">
-          <thead>
-            <tr>
-              <th>Server</th>
-              <th>Tests</th>
-              <th>Download</th>
-              <th>Upload</th>
-              <th>Ping</th>
-            </tr>
-          </thead>
-          <tbody>
-            {servers.map((s) => (
-              <tr key={`${s.name}|${s.host}`}>
-                <td>
-                  {s.name} <small className="muted">{s.location}</small>
-                </td>
-                <td>{s.tests}</td>
-                <td>{formatBps(s.downloadBps)}</td>
-                <td>{formatBps(s.uploadBps)}</td>
-                <td>{ms(s.pingMs)}</td>
               </tr>
             ))}
           </tbody>
