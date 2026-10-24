@@ -1,5 +1,6 @@
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { LiveProvider } from "./components/LiveProvider.js";
+import { QueueMenu } from "./components/QueueMenu.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { HistoryPage } from "./pages/HistoryPage.js";
 import { HomePage } from "./pages/HomePage.js";
@@ -21,6 +22,7 @@ export function App() {
           <NavLink to="/monitoring">Monitoring</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
+        <QueueMenu />
       </header>
       <main>
         <StatusBar />

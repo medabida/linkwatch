@@ -37,6 +37,7 @@ const routes = {
   "GET /api/targets": () => [],
   "GET /api/runs": () => ({ rows: [], total: 0, page: 1, pageSize: 25 }),
   "GET /api/dashboard": () => emptyDashboard,
+  "GET /api/queue": () => ({ running: [], queued: [] }),
   "GET /api/settings": () => ({ parallelSites: true, parallelInterfaces: false }),
 };
 

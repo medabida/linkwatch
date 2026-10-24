@@ -330,6 +330,14 @@ describe("runs", () => {
   });
 });
 
+describe("queue", () => {
+  it("returns an empty snapshot when idle", async () => {
+    const res = await request(app()).get("/api/queue");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ running: [], queued: [] });
+  });
+});
+
 describe("settings", () => {
   it("returns the defaults, updates partially and reloads the dispatcher", async () => {
     expect((await request(app()).get("/api/settings")).body).toEqual({ parallelSites: true, parallelInterfaces: false });

@@ -339,6 +339,52 @@ describe("concurrency settings", () => {
   });
 });
 
+describe("snapshot", () => {
+  it("lists running tests with progress and the waiting queue in order", async () => {
+    addWorker("w1", "home");
+    addWorker("w2", "home");
+    connected.add("w1").add("w2");
+    addTarget("w1", "A");
+    addTarget("w2", "B");
+    addTarget("w1", "C");
+    let report: (p: { phase: string; progress: number; value: number }) => void = () => {};
+    const open: Array<() => void> = [];
+    runTest.mockImplementation(
+      (r) =>
+        new Promise<TestOutcome>((res) => {
+          report = (p) => r.onProgress?.(p as never);
+          open.push(() => res(OK));
+        }),
+    );
+    expect(dispatcher.snapshot()).toEqual({ running: [], queued: [] });
+    dispatcher.reload();
+    await vi.advanceTimersByTimeAsync(0);
+    report({ phase: "download", progress: 0.4, value: 5e7 });
+    const snap = dispatcher.snapshot();
+    expect(snap.running).toHaveLength(1);
+    expect(snap.running[0]).toMatchObject({
+      targetId: 1,
+      label: "A",
+      workerName: "w1",
+      site: "home",
+      attempt: 1,
+      phase: "download",
+      progress: 0.4,
+      value: 5e7,
+    });
+    expect(snap.queued.map((q) => [q.label, q.workerName, q.trigger])).toEqual([
+      ["B", "w2", "startup"],
+      ["C", "w1", "startup"],
+    ]);
+    for (let i = 0; i < 3; i++) {
+      open[i]?.();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    await settle();
+    expect(dispatcher.snapshot()).toEqual({ running: [], queued: [] });
+  });
+});
+
 describe("retries and failures", () => {
   const setup = () => {
     addWorker("w1");

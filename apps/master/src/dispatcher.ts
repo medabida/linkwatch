@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { Repos } from "@linkwatch/db";
 import type { TestFailureKind } from "@linkwatch/protocol";
-import { DEFAULT_SITE, MAX_ATTEMPTS, type RunTrigger, type SettingsDto, type TargetDto, type WorkerActivity } from "@linkwatch/shared";
+import {
+  DEFAULT_SITE,
+  MAX_ATTEMPTS,
+  type QueueDto,
+  type RunTrigger,
+  type SettingsDto,
+  type TargetDto,
+  type WorkerActivity,
+} from "@linkwatch/shared";
 import type { EventBus } from "./events.js";
 import { failureText, type WorkerHub } from "./hub.js";
 
@@ -23,6 +31,7 @@ interface QueueItem {
 interface RunningTest {
   workerId: string;
   site: string;
+  startedAt: number;
   done: Promise<void>;
 }
 
@@ -94,7 +103,7 @@ export function createDispatcher({ repos, hub, bus, newId = randomUUID, log = ()
   function start(item: QueueItem): void {
     const target = targets.get(item.targetId);
     if (!target) return;
-    const entry: RunningTest = { workerId: item.workerId, site: item.site, done: Promise.resolve() };
+    const entry: RunningTest = { workerId: item.workerId, site: item.site, startedAt: Date.now(), done: Promise.resolve() };
     entry.done = (async () => {
       try {
         await runTarget(target, item.trigger);
@@ -258,6 +267,36 @@ export function createDispatcher({ repos, hub, bus, newId = randomUUID, log = ()
     activityOf: (workerId: string): WorkerActivity | null => activities.get(workerId) ?? null,
     whenIdle: async () => {
       while (running.size > 0) await Promise.all([...running.values()].map((r) => r.done));
+    },
+    /** Tests in progress and the waiting queue (in the order they will be considered). */
+    snapshot(): QueueDto {
+      const label = (id: number) => targets.get(id)?.label ?? `#${id}`;
+      const workerName = (id: string) => repos.workers.get(id)?.name ?? id;
+      return {
+        running: [...running].map(([targetId, r]) => {
+          const a = activities.get(r.workerId);
+          return {
+            targetId,
+            label: label(targetId),
+            workerId: r.workerId,
+            workerName: workerName(r.workerId),
+            site: r.site,
+            attempt: a?.targetId === targetId ? a.attempt : null,
+            phase: a?.phase,
+            progress: a?.progress,
+            value: a?.value,
+            startedAt: r.startedAt,
+          };
+        }),
+        queued: queue.map((i) => ({
+          targetId: i.targetId,
+          label: label(i.targetId),
+          workerId: i.workerId,
+          workerName: workerName(i.workerId),
+          site: i.site,
+          trigger: i.trigger,
+        })),
+      };
     },
     /** Per site: the first running target (null if none), all running targets and the queued ones. */
     get state() {

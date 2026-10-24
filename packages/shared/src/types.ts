@@ -347,3 +347,31 @@ export interface SettingsDto {
   /** Interfaces of different workers in the same site may test at the same time. A worker still runs one test at a time. */
   parallelInterfaces: boolean;
 }
+
+export interface QueueRunningDto {
+  targetId: number;
+  label: string;
+  workerId: string;
+  workerName: string;
+  site: string;
+  attempt: number | null;
+  phase?: string;
+  progress?: number;
+  value?: number;
+  startedAt: number;
+}
+
+export interface QueueWaitingDto {
+  targetId: number;
+  label: string;
+  workerId: string;
+  workerName: string;
+  site: string;
+  trigger: RunTrigger;
+}
+
+/** What the dispatcher is doing right now: tests in progress and the waiting queue in start order. */
+export interface QueueDto {
+  running: QueueRunningDto[];
+  queued: QueueWaitingDto[];
+}

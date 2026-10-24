@@ -6,6 +6,7 @@ import {
   type DashboardDto,
   dashboardQuerySchema,
   type HealthDto,
+  type QueueDto,
   type RunDetailDto,
   type RunsPage,
   runNowSchema,
@@ -186,6 +187,11 @@ export function createApp({ repos, hub, dispatcher, bus, webDist = path.join(REP
     const q = runsQuerySchema.parse(req.query);
     const { rows, total } = repos.runs.list(q);
     const body: RunsPage = { rows, total, page: q.page, pageSize: q.pageSize };
+    res.json(body);
+  });
+
+  app.get("/api/queue", (_req, res) => {
+    const body: QueueDto = dispatcher.snapshot();
     res.json(body);
   });
 
