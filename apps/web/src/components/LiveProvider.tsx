@@ -18,6 +18,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       dispatch(e);
       if (e.type === "run_started" || e.type === "run_finished") void qc.invalidateQueries({ queryKey: ["runs"] });
       if (e.type === "run_finished") void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      if (e.type === "alert_changed") void qc.invalidateQueries({ queryKey: ["alerts"] });
       if (e.type !== "run_progress") {
         void qc.invalidateQueries({ queryKey: ["workers"] });
         void qc.invalidateQueries({ queryKey: ["queue"] });

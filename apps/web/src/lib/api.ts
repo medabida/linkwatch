@@ -1,4 +1,10 @@
 import type {
+  AlertEventDto,
+  AlertRuleDto,
+  AlertRuleInput,
+  ChannelCreateInput,
+  ChannelDto,
+  ChannelUpdateInput,
   DashboardDto,
   HealthDto,
   QueueDto,
@@ -87,5 +93,19 @@ export const api = {
   queue: () => request<QueueDto>("/api/queue"),
   settings: () => request<SettingsDto>("/api/settings"),
   updateSettings: (patch: SettingsUpdate) => request<SettingsDto>("/api/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+  alertRules: () => request<AlertRuleDto[]>("/api/alerts/rules"),
+  createAlertRule: (r: AlertRuleInput) => request<AlertRuleDto>("/api/alerts/rules", { method: "POST", body: JSON.stringify(r) }),
+  updateAlertRule: (id: number, r: AlertRuleInput) =>
+    request<AlertRuleDto>(`/api/alerts/rules/${id}`, { method: "PUT", body: JSON.stringify(r) }),
+  deleteAlertRule: (id: number) => request<void>(`/api/alerts/rules/${id}`, { method: "DELETE" }),
+  alertEvents: (state: "active" | "all" = "all", limit = 100) =>
+    request<AlertEventDto[]>(`/api/alerts/events?state=${state}&limit=${limit}`),
+  ackAlert: (id: number) => request<AlertEventDto>(`/api/alerts/events/${id}/ack`, { method: "POST" }),
+  channels: () => request<ChannelDto[]>("/api/alerts/channels"),
+  createChannel: (c: ChannelCreateInput) => request<ChannelDto>("/api/alerts/channels", { method: "POST", body: JSON.stringify(c) }),
+  updateChannel: (id: number, c: ChannelUpdateInput) =>
+    request<ChannelDto>(`/api/alerts/channels/${id}`, { method: "PATCH", body: JSON.stringify(c) }),
+  deleteChannel: (id: number) => request<void>(`/api/alerts/channels/${id}`, { method: "DELETE" }),
+  testChannel: (id: number) => request<{ ok: true }>(`/api/alerts/channels/${id}/test`, { method: "POST" }),
   run: (id: number) => request<RunDetailDto>(`/api/runs/${id}`),
 };

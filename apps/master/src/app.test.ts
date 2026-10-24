@@ -7,6 +7,7 @@ import { parseToken, WS_PATH } from "@linkwatch/protocol";
 import { emptyMetrics, type WorkerDto } from "@linkwatch/shared";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createAlerting } from "./alerting.js";
 import { createApp, ensureLocalWorker } from "./app.js";
 import { createDispatcher } from "./dispatcher.js";
 import { createEventBus } from "./events.js";
@@ -18,7 +19,11 @@ let bus: ReturnType<typeof createEventBus>;
 let hub: ReturnType<typeof createWorkerHub>;
 let dispatcher: ReturnType<typeof createDispatcher>;
 let reloads = 0;
-const app = (webDist = "/nonexistent") => createApp({ repos, hub, dispatcher, bus, webDist });
+let notify = vi.fn(async (_c: unknown, _t: string) => ({ ok: true as const }));
+const app = (webDist = "/nonexistent") => {
+  const alerting = createAlerting({ repos, hub, bus, notify });
+  return createApp({ repos, hub, dispatcher, alerting, bus, webDist });
+};
 const body = { label: "ISP A", bindType: "interface", bindValue: "eth0", intervalMinutes: 30 };
 
 beforeEach(() => {
@@ -27,6 +32,7 @@ beforeEach(() => {
   bus = createEventBus();
   hub = createWorkerHub({ repos });
   dispatcher = createDispatcher({ repos, hub, bus });
+  notify = vi.fn(async (_c: unknown, _t: string) => ({ ok: true as const }));
   reloads = 0;
   const reload = dispatcher.reload;
   dispatcher.reload = () => {
@@ -475,5 +481,119 @@ describe("SSE /api/events", () => {
       server.close();
     }
     await vi.waitFor(() => expect(bus.size).toBe(0));
+  });
+});
+
+describe("alerting API", () => {
+  const rule = {
+    name: "Down",
+    scope: { kind: "all" },
+    condition: { type: "test_failed", consecutive: 2 },
+  };
+  const channel = { name: "tg", botToken: "123456:ABCDEFGHIJKLMNOPQRSTUV", chatId: "42" };
+
+  it("creates channels without ever returning the bot token", async () => {
+    const res = await request(app()).post("/api/alerts/channels").send(channel);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ name: "tg", type: "telegram", chatId: "42", tokenPreview: "123456:••••STUV" });
+    expect(JSON.stringify((await request(app()).get("/api/alerts/channels")).body)).not.toContain("ABCDEFGH");
+    expect(
+      (
+        await request(app())
+          .post("/api/alerts/channels")
+          .send({ ...channel, botToken: "nope" })
+      ).status,
+    ).toBe(400);
+  });
+
+  it("updates a channel without resending the token, and deleting it detaches it from rules", async () => {
+    const c = (await request(app()).post("/api/alerts/channels").send(channel)).body;
+    expect((await request(app()).patch(`/api/alerts/channels/${c.id}`).send({ chatId: "-100" })).body).toMatchObject({
+      chatId: "-100",
+      tokenPreview: c.tokenPreview,
+    });
+    expect((await request(app()).patch("/api/alerts/channels/999").send({ name: "x" })).status).toBe(404);
+    const r = (
+      await request(app())
+        .post("/api/alerts/rules")
+        .send({ ...rule, channelIds: [c.id] })
+    ).body;
+    expect((await request(app()).delete(`/api/alerts/channels/${c.id}`)).status).toBe(204);
+    expect((await request(app()).get("/api/alerts/rules")).body[0]).toMatchObject({ id: r.id, channelIds: [] });
+  });
+
+  it("sends a test message and reports failures", async () => {
+    const c = (await request(app()).post("/api/alerts/channels").send(channel)).body;
+    expect((await request(app()).post(`/api/alerts/channels/${c.id}/test`)).body).toEqual({ ok: true });
+    expect(notify).toHaveBeenCalledWith({ botToken: channel.botToken, chatId: "42" }, expect.stringContaining("test message"));
+    notify.mockResolvedValueOnce({ ok: false, error: "Telegram 401: Unauthorized" } as never);
+    const res = await request(app()).post(`/api/alerts/channels/${c.id}/test`);
+    expect(res.status).toBe(502);
+    expect(res.body).toEqual({ ok: false, error: "Telegram 401: Unauthorized" });
+    expect((await request(app()).get("/api/alerts/channels")).body[0].lastError).toBe("Telegram 401: Unauthorized");
+    expect((await request(app()).post("/api/alerts/channels/999/test")).status).toBe(404);
+  });
+
+  it("creates, updates, lists and deletes rules with defaults and validation", async () => {
+    const res = await request(app()).post("/api/alerts/rules").send(rule);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      enabled: true,
+      severity: "warning",
+      cooldownMinutes: 360,
+      renotifyMinutes: 0,
+      notifyRecovery: true,
+      channelIds: [],
+    });
+    expect(
+      (
+        await request(app())
+          .put(`/api/alerts/rules/${res.body.id}`)
+          .send({ ...rule, name: "Renamed", severity: "critical" })
+      ).body,
+    ).toMatchObject({ name: "Renamed", severity: "critical" });
+    expect((await request(app()).put("/api/alerts/rules/999").send(rule)).status).toBe(404);
+    expect(
+      (
+        await request(app())
+          .post("/api/alerts/rules")
+          .send({ ...rule, condition: { type: "test_failed", consecutive: 0 } })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app())
+          .post("/api/alerts/rules")
+          .send({ ...rule, condition: { type: "nope" } })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app())
+          .post("/api/alerts/rules")
+          .send({ ...rule, channelIds: [42] })
+      ).status,
+    ).toBe(400);
+    expect((await request(app()).delete(`/api/alerts/rules/${res.body.id}`)).status).toBe(204);
+    expect((await request(app()).delete(`/api/alerts/rules/${res.body.id}`)).status).toBe(404);
+    expect((await request(app()).get("/api/alerts/rules")).body).toEqual([]);
+  });
+
+  it("lists and acknowledges alert events", async () => {
+    const r = (await request(app()).post("/api/alerts/rules").send(rule)).body;
+    const e = repos.alerts.events.open({
+      ruleId: r.id,
+      ruleName: "Down",
+      severity: "warning",
+      subjectKind: "worker",
+      subjectId: "x",
+      subjectLabel: "X",
+      message: "m",
+      value: null,
+    });
+    expect((await request(app()).get("/api/alerts/events?state=active")).body).toHaveLength(1);
+    expect((await request(app()).post(`/api/alerts/events/${e.id}/ack`)).body.acknowledgedAt).not.toBeNull();
+    expect((await request(app()).post(`/api/alerts/events/${e.id}/ack`)).status).toBe(404);
+    expect((await request(app()).get("/api/alerts/events?state=bogus")).status).toBe(400);
   });
 });

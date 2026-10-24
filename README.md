@@ -46,6 +46,14 @@ The **Home** page (`/`) shows charts built from the finished tests; **History** 
 - A test that was retried counts once (its last attempt). Failed tests count in reliability and the timeline but not in speed or latency statistics, and buckets without data are shown as gaps.
 - Data comes from `GET /api/dashboard?from=&to=&workerId=&site=&targetIds=1,2&tzOffsetMin=`, which buckets and aggregates on the master (about 240 buckets per chart). `tzOffsetMin` is the browser's timezone, used for day and hour-of-day grouping. The page refreshes when a test finishes and every 30 seconds.
 
+### Alerting
+The **Alerting** page (top bar bell shows the number of open alerts) has four tabs: **Active** (firing now, acknowledge to stop reminders), **Rules**, **History** and **Channels**.
+- **Rule types:** test failed (N final failures in a row, retries don't count), interface stale (no successful test for N intervals), worker offline (for N minutes), speed (below a fixed Mbps or below a percentage of the interface's own 7-day average), latency/jitter/latency under load, packet loss, and external IP change. Metric rules need N tests in a row ("sustained"), and failed tests neither fire nor clear them.
+- **Scope:** everything, a site, a worker or specific interfaces. Disabled workers and interfaces never alert, and open alerts for them are closed silently.
+- **Behaviour:** a rule notifies once when it fires and once when it clears. Re-firing within the rule's cooldown is recorded but not notified again, and an optional reminder interval repeats the message while it is open and unacknowledged. Time-based rules are checked every minute, result-based rules when a test finishes. The IP change alert is a one-off event, not a state.
+- **Telegram:** create a bot with @BotFather, send it a message (or add it to a group), find the chat id via `https://api.telegram.org/bot<token>/getUpdates`, then add it in **Channels** and use **Send test**. The bot token is stored in the master's database and never returned by the API (only a masked preview). The master only needs outbound HTTPS to `api.telegram.org`. A failed send is shown on the channel and never blocks evaluation.
+- **API:** `GET`/`POST /api/alerts/rules`, `PUT`/`DELETE /api/alerts/rules/:id`, `GET /api/alerts/events?state=active|all`, `POST /api/alerts/events/:id/ack`, `GET`/`POST /api/alerts/channels`, `PATCH`/`DELETE /api/alerts/channels/:id`, `POST /api/alerts/channels/:id/test`. Changes are pushed to the page over the event stream (`alert_changed`).
+
 Development: `pnpm dev:master`, `pnpm dev:worker`, `pnpm dev:web` (Vite on :5173, proxying /api to :3000; run `pnpm build` once first so the workspace packages exist in `dist`).
 Quality: `pnpm test` (builds, then runs all Vitest suites), `pnpm lint`, `pnpm typecheck`. GitHub Actions (`.github/workflows/ci.yml`) runs lint, build, typecheck and tests on pushes to `main` and on every pull request. Requiring it to pass before merging is a branch-protection setting on GitHub and is not configured by the repo.
 The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing except `data/worker.json`.
@@ -107,6 +115,7 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 ### Master (`apps/master`)
 - `hub.ts`: WebSocket server (upgrade on `/ws/worker`), mutual HMAC handshake, one live connection per worker, ping/pong liveness, `runTest()` with a watchdog, status computation (`online`, `reconnecting` for up to 10s, `offline`, `waiting`, `disabled`, `incompatible`).
 - `dispatcher.ts`: per-target timers feeding one FIFO queue that starts every test the concurrency settings allow (a blocked test never gets overtaken by a conflicting later one), run persistence, retry rules, per-worker activity.
+- `alerting.ts`: rule evaluator (state machine per rule and interface or worker, cooldown, reminders, recovery); `notifier.ts`: Telegram sender behind a small function interface.
 - `supervisor.ts`: spawns and supervises the local worker child process (restart with backoff, SIGTERM then SIGKILL on stop). The local worker is auto-provisioned, cannot be deleted or have its token rotated, only disabled.
 - `events.ts`: in-process event bus. `app.ts`: REST API (`/api/workers`, `/api/targets`, `/api/runs`, `/api/events`, `/api/health`). `workers.ts`: worker DTO builder.
 
@@ -119,6 +128,7 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 ### Data model
 - `workers`: id, name (unique), site, kind (`local` | `remote`), secret, enabled, created_at, last_seen_at, last_connected_at, info (machine + engine status, JSON), interfaces (JSON) + updated_at
 - `targets`: id, worker_id (cascade delete), label, bind_type, bind_value, interval_minutes (>= 5), timeout_seconds, enabled, created_at, updated_at
+- `alert_rules` (scope and condition as JSON), `alert_events` (one row per firing, keeps a snapshot of the rule name when the rule is deleted), `notification_channels` (Telegram bot token and chat id)
 - `settings`: key, value (JSON). `parallelSites` and `parallelInterfaces`; missing keys fall back to the defaults
 - `runs`: id, worker_id (set null on delete) + worker_name/site snapshots, target_id (set null) + label/binding snapshots, attempt_group_id, attempt_number, trigger, status (`running` | `ok` | `failed` | `timeout`), engine, timings, every metric the engine reports, error_message, exit_code, stderr, `raw_json`
 
@@ -135,7 +145,7 @@ The master's SQLite DB is created at `data/linkwatch.db`. Workers store nothing 
 - When Caddy OAuth is added, `/ws/worker` must bypass it.
 
 ### Frontend
-- Pages: **Workers** (status, last seen, machine info, Ookla status, latency/uptime, current activity, interfaces, targets with last result, add/edit in dialogs, enable/disable, rotate token, remove, run now, refresh interfaces; the pairing command is shown in a dialog after creating a worker or rotating a token, with an editable master address and a localhost warning), **History** (worker/site columns and filters), **Queue dropdown** (top bar, right: tests in progress with live progress and the waiting queue in start order; `GET /api/queue`), **Settings** (the two scheduling switches, saved immediately; `GET`/`PATCH /api/settings`), **Monitoring** (targets, added and edited in a dialog; pick a worker, then an interface from its reported list; configured interfaces that disappeared are flagged), status banners (local worker disconnected, remote workers offline/incompatible, Ookla missing) and live progress.
+- Pages: **Workers** (status, last seen, machine info, Ookla status, latency/uptime, current activity, interfaces, targets with last result, add/edit in dialogs, enable/disable, rotate token, remove, run now, refresh interfaces; the pairing command is shown in a dialog after creating a worker or rotating a token, with an editable master address and a localhost warning), **History** (worker/site columns and filters), **Queue dropdown** (top bar, right: tests in progress with live progress and the waiting queue in start order; `GET /api/queue`), **Alerting** (see above), **Settings** (the two scheduling switches, saved immediately; `GET`/`PATCH /api/settings`), **Monitoring** (targets, added and edited in a dialog; pick a worker, then an interface from its reported list; configured interfaces that disappeared are flagged), status banners (local worker disconnected, remote workers offline/incompatible, Ookla missing) and live progress.
 - Table stack: TanStack Table + TanStack Query, server-driven state kept in the URL.
 
 ## Testing
@@ -143,6 +153,7 @@ Unit tests are written alongside each piece of code, using Vitest (`pnpm test` r
 - **Protocol:** schema validation and handshake proofs (valid, wrong secret, reflection, replay, tampering).
 - **Hub:** real WebSocket connections against a hand-rolled protocol client: handshake accept/reject (bad secret, unknown id, incompatible, disabled), throttling, duplicate replacement, ping/pong and pong timeout, status transitions, dispatch/progress/result/failure, lost connection, watchdog, abort, token rotation.
 - **Dispatcher:** fake timers and a fake hub: startup behaviour, intervals, concurrency settings (sites, interfaces, one test per worker, no starvation, live changes), retry rules per failure kind, offline runs, shutdown abort.
+- **Alerting:** every rule type, scope, cooldown, reminders and acknowledgement, sweeps for stale interfaces and offline workers, silent clean-up, failed sends, and the Telegram notifier against a fake `fetch`.
 - **Supervisor:** real child processes (restart/backoff, graceful stop, SIGKILL, missing binary).
 - **Worker:** engine fixtures, and the client against a fake master speaking the real handshake (reconnect, abort on disconnect, busy rejection, idle timeout), interface watcher, config precedence and file permissions.
 - **API:** supertest on an in-memory DB, including a real worker connection for status/rotation.

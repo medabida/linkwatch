@@ -41,3 +41,11 @@ export const DASHBOARD_METRICS = [
 
 /** First-start values: the behaviour before the settings existed (one test at a time per site, sites in parallel). */
 export const DEFAULT_SETTINGS = { parallelSites: true, parallelInterfaces: false } as const;
+
+export const ALERT_TYPES = ["test_failed", "stale", "worker_offline", "speed", "latency", "packet_loss", "ip_change"] as const;
+export const ALERT_SEVERITIES = ["warning", "critical"] as const;
+export const SPEED_METRICS = ["downloadBps", "uploadBps"] as const;
+export const LATENCY_METRICS = ["pingMs", "pingJitterMs", "downloadLatencyIqmMs", "uploadLatencyIqmMs"] as const;
+export const CHANNEL_TYPES = ["telegram"] as const;
+/** Minimum number of past results needed before a baseline-relative speed rule evaluates. */
+export const MIN_BASELINE_SAMPLES = 3;

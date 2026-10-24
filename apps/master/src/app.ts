@@ -3,6 +3,13 @@ import path from "node:path";
 import { BASELINE_MS, buildDashboard, REPO_ROOT, type Repos } from "@linkwatch/db";
 import { CLOSE_DISABLED, CLOSE_REMOVED, CLOSE_TOKEN_ROTATED, formatToken, generateSecret, generateWorkerId } from "@linkwatch/protocol";
 import {
+  type AlertEventDto,
+  type AlertRuleDto,
+  alertEventsQuerySchema,
+  alertRuleInputSchema,
+  type ChannelDto,
+  channelCreateSchema,
+  channelUpdateSchema,
   type DashboardDto,
   dashboardQuerySchema,
   type HealthDto,
@@ -21,6 +28,7 @@ import {
 } from "@linkwatch/shared";
 import express, { type ErrorRequestHandler, type Express } from "express";
 import { ZodError } from "zod";
+import type { Alerting } from "./alerting.js";
 import type { Dispatcher } from "./dispatcher.js";
 import type { EventBus } from "./events.js";
 import type { WorkerHub } from "./hub.js";
@@ -30,6 +38,7 @@ export interface AppDeps {
   repos: Repos;
   hub: WorkerHub;
   dispatcher: Dispatcher;
+  alerting: Alerting;
   bus: EventBus;
   webDist?: string;
 }
@@ -54,7 +63,14 @@ const parseId = (v: string | undefined): number => {
   return n;
 };
 
-export function createApp({ repos, hub, dispatcher, bus, webDist = path.join(REPO_ROOT, "apps", "web", "dist") }: AppDeps): Express {
+export function createApp({
+  repos,
+  hub,
+  dispatcher,
+  alerting,
+  bus,
+  webDist = path.join(REPO_ROOT, "apps", "web", "dist"),
+}: AppDeps): Express {
   ensureLocalWorker(repos);
   const app = express();
   app.disable("x-powered-by");
@@ -245,6 +261,82 @@ export function createApp({ repos, hub, dispatcher, bus, webDist = path.join(REP
     if (workerId !== undefined && !repos.workers.get(workerId)) throw new HttpError(404, "Worker not found");
     const queued = dispatcher.runNow({ targetId, workerId });
     res.status(202).json({ queued });
+  });
+
+  const checkChannels = (ids: number[]) => {
+    const missing = ids.filter((id) => !repos.alerts.channels.get(id));
+    if (missing.length) throw new HttpError(400, `Unknown notification channel: ${missing.join(", ")}`);
+  };
+
+  app.get("/api/alerts/rules", (_req, res) => {
+    const body: AlertRuleDto[] = repos.alerts.rules.list();
+    res.json(body);
+  });
+
+  app.post("/api/alerts/rules", (req, res) => {
+    const input = alertRuleInputSchema.parse(req.body ?? {});
+    checkChannels(input.channelIds);
+    const body: AlertRuleDto = repos.alerts.rules.create(input);
+    alerting.sweep();
+    res.status(201).json(body);
+  });
+
+  app.put("/api/alerts/rules/:id", (req, res) => {
+    const input = alertRuleInputSchema.parse(req.body ?? {});
+    checkChannels(input.channelIds);
+    const body: AlertRuleDto | undefined = repos.alerts.rules.update(parseId(req.params.id), input);
+    if (!body) throw new HttpError(404, "Rule not found");
+    alerting.sweep();
+    res.json(body);
+  });
+
+  app.delete("/api/alerts/rules/:id", (req, res) => {
+    if (!repos.alerts.rules.remove(parseId(req.params.id))) throw new HttpError(404, "Rule not found");
+    alerting.sweep();
+    res.status(204).end();
+  });
+
+  app.get("/api/alerts/events", (req, res) => {
+    const body: AlertEventDto[] = repos.alerts.events.list(alertEventsQuerySchema.parse(req.query));
+    res.json(body);
+  });
+
+  app.post("/api/alerts/events/:id/ack", (req, res) => {
+    const body: AlertEventDto | undefined = alerting.acknowledge(parseId(req.params.id));
+    if (!body) throw new HttpError(404, "No open alert with that id (or it is already acknowledged)");
+    res.json(body);
+  });
+
+  app.get("/api/alerts/channels", (_req, res) => {
+    const body: ChannelDto[] = repos.alerts.channels.list();
+    res.json(body);
+  });
+
+  app.post("/api/alerts/channels", (req, res) => {
+    const body: ChannelDto = repos.alerts.channels.create(channelCreateSchema.parse(req.body ?? {}));
+    res.status(201).json(body);
+  });
+
+  app.patch("/api/alerts/channels/:id", (req, res) => {
+    const body: ChannelDto | undefined = repos.alerts.channels.update(parseId(req.params.id), channelUpdateSchema.parse(req.body ?? {}));
+    if (!body) throw new HttpError(404, "Channel not found");
+    res.json(body);
+  });
+
+  app.delete("/api/alerts/channels/:id", (req, res) => {
+    if (!repos.alerts.channels.remove(parseId(req.params.id))) throw new HttpError(404, "Channel not found");
+    for (const rule of repos.alerts.rules.list()) {
+      const id = parseId(req.params.id);
+      if (rule.channelIds.includes(id))
+        repos.alerts.rules.update(rule.id, { ...rule, channelIds: rule.channelIds.filter((c) => c !== id) });
+    }
+    res.status(204).end();
+  });
+
+  app.post("/api/alerts/channels/:id/test", async (req, res) => {
+    const sent = await alerting.sendTest(parseId(req.params.id), "✅ LinkWatch test message: notifications work.");
+    if (!sent) throw new HttpError(404, "Channel not found");
+    res.status(sent.ok ? 200 : 502).json(sent.ok ? { ok: true } : { ok: false, error: sent.error });
   });
 
   app.get("/api/events", (req, res) => {

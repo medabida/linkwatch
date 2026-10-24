@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { describeScheduling } from "../lib/format.js";
 
@@ -72,6 +73,9 @@ export function SettingsPage() {
       ) : (
         !settings.error && <p className="muted">Loading…</p>
       )}
+      <p className="muted">
+        Notification channels (Telegram) are configured on the <Link to="/alerting?tab=channels">Alerting page</Link>.
+      </p>
     </section>
   );
 }

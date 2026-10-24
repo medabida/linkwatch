@@ -164,3 +164,110 @@ describe("settings", () => {
     expect(repos.settings.get()).toEqual({ parallelSites: false, parallelInterfaces: true });
   });
 });
+
+describe("run helpers for alerting", () => {
+  const finish = (id: number, status: "ok" | "failed", metrics = {}) => repos.runs.finish(id, { status, metrics });
+
+  it("lastFinal keeps only the final attempt of each test, newest first", () => {
+    const a = repos.targets.create(target);
+    finish(repos.runs.start(newRun(a.id, { attemptGroupId: "g1" })), "ok");
+    finish(repos.runs.start(newRun(a.id, { attemptGroupId: "g2", attemptNumber: 1 })), "failed");
+    finish(repos.runs.start(newRun(a.id, { attemptGroupId: "g2", attemptNumber: 2 })), "ok");
+    finish(repos.runs.start(newRun(a.id, { attemptGroupId: "g3", attemptNumber: 1 })), "failed");
+    const last = repos.runs.lastFinal(a.id, 5);
+    expect(last.map((r) => [r.attemptGroupId, r.status])).toEqual([
+      ["g3", "failed"],
+      ["g2", "ok"],
+      ["g1", "ok"],
+    ]);
+    expect(repos.runs.lastFinal(a.id, 1)).toHaveLength(1);
+  });
+
+  it("averages a metric over successful runs in a window and finds the last success", () => {
+    const a = repos.targets.create(target);
+    finish(repos.runs.start(newRun(a.id, { attemptGroupId: "g1" })), "ok", { downloadBps: 100 });
+    finish(repos.runs.start(newRun(a.id, { attemptGroupId: "g2" })), "ok", { downloadBps: 300 });
+    finish(repos.runs.start(newRun(a.id, { attemptGroupId: "g3" })), "failed");
+    expect(repos.runs.avgMetric(a.id, "downloadBps", 0, 10_000)).toEqual({ avg: 200, n: 2 });
+    expect(repos.runs.avgMetric(a.id, "uploadBps", 0, 10_000)).toEqual({ avg: null, n: 0 });
+    expect(repos.runs.lastOkAt(a.id)).toBeGreaterThan(0);
+    expect(repos.runs.lastOkAt(999)).toBeNull();
+  });
+});
+
+describe("alerting repos", () => {
+  const rule = {
+    name: "Down",
+    enabled: true,
+    severity: "critical" as const,
+    scope: { kind: "all" as const },
+    condition: { type: "test_failed" as const, consecutive: 2 },
+    channelIds: [],
+    cooldownMinutes: 360,
+    renotifyMinutes: 0,
+    notifyRecovery: true,
+  };
+  const ev = (ruleId: number, over = {}) => ({
+    ruleId,
+    ruleName: "Down",
+    severity: "critical" as const,
+    subjectKind: "target" as const,
+    subjectId: "1",
+    subjectLabel: "A",
+    message: "m",
+    value: null,
+    ...over,
+  });
+
+  it("stores rules with their JSON scope and condition", () => {
+    const r = repos.alerts.rules.create(rule);
+    expect(repos.alerts.rules.get(r.id)).toMatchObject({
+      name: "Down",
+      condition: { type: "test_failed", consecutive: 2 },
+      scope: { kind: "all" },
+    });
+    expect(repos.alerts.rules.update(r.id, { ...rule, name: "X", enabled: false })).toMatchObject({ name: "X", enabled: false });
+    expect(repos.alerts.rules.remove(r.id)).toBe(true);
+    expect(repos.alerts.rules.get(r.id)).toBeUndefined();
+  });
+
+  it("tracks the event lifecycle and keeps events when the rule is deleted", () => {
+    const r = repos.alerts.rules.create(rule);
+    const e = repos.alerts.events.open(ev(r.id));
+    expect(repos.alerts.events.findActive(r.id, "1")?.id).toBe(e.id);
+    expect(repos.alerts.events.findActive(r.id, "2")).toBeUndefined();
+    expect(repos.alerts.events.acknowledge(e.id)?.acknowledgedAt).not.toBeNull();
+    expect(repos.alerts.events.acknowledge(e.id)).toBeUndefined();
+    repos.alerts.events.markNotified(e.id);
+    expect(repos.alerts.events.lastFor(r.id, "1")?.id).toBe(e.id);
+    expect(repos.alerts.events.lastFor(r.id, "1", e.id)).toBeUndefined();
+    expect(repos.alerts.events.resolve(e.id)).toMatchObject({ state: "resolved" });
+    expect(repos.alerts.events.resolve(e.id)).toBeUndefined();
+    expect(repos.alerts.events.activeList()).toEqual([]);
+    expect(repos.alerts.events.list({ state: "all", limit: 10 })).toHaveLength(1);
+    repos.alerts.rules.remove(r.id);
+    expect(repos.alerts.events.list({ state: "all", limit: 10 })[0]).toMatchObject({ ruleId: null, ruleName: "Down" });
+  });
+
+  it("masks the bot token, keeps it on updates and records send results", () => {
+    const c = repos.alerts.channels.create({
+      name: "tg",
+      type: "telegram",
+      botToken: "123456:ABCDEFGHIJKLMNOPQRSTUV",
+      chatId: "-100",
+      enabled: true,
+    });
+    expect(c.tokenPreview).toBe("123456:••••STUV");
+    expect(JSON.stringify(c)).not.toContain("ABCDEFGH");
+    const u = repos.alerts.channels.update(c.id, { name: "renamed", chatId: "42" });
+    expect(u).toMatchObject({ name: "renamed", chatId: "42", tokenPreview: "123456:••••STUV" });
+    expect(repos.alerts.channels.getRaw(c.id)?.config.botToken).toBe("123456:ABCDEFGHIJKLMNOPQRSTUV");
+    repos.alerts.channels.recordResult(c.id, "boom");
+    expect(repos.alerts.channels.get(c.id)).toMatchObject({ lastError: "boom", lastSentAt: null });
+    repos.alerts.channels.recordResult(c.id, null);
+    expect(repos.alerts.channels.get(c.id)).toMatchObject({ lastError: null });
+    expect(repos.alerts.channels.get(c.id)?.lastSentAt).not.toBeNull();
+    expect(repos.alerts.channels.update(999, { name: "x" })).toBeUndefined();
+    expect(repos.alerts.channels.remove(c.id)).toBe(true);
+  });
+});

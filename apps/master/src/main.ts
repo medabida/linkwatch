@@ -2,10 +2,12 @@ import path from "node:path";
 import { createDb, createRepos, REPO_ROOT } from "@linkwatch/db";
 import { formatToken } from "@linkwatch/protocol";
 import { DEFAULT_API_PORT } from "@linkwatch/shared";
+import { createAlerting } from "./alerting.js";
 import { createApp, ensureLocalWorker } from "./app.js";
 import { createDispatcher } from "./dispatcher.js";
 import { createEventBus, relayWorkerChanges } from "./events.js";
 import { createWorkerHub } from "./hub.js";
+import { createTelegramNotifier } from "./notifier.js";
 import { createSupervisor } from "./supervisor.js";
 
 const port = Number(process.env.API_PORT) || DEFAULT_API_PORT;
@@ -20,13 +22,15 @@ const bus = createEventBus();
 const hub = createWorkerHub({ repos, log });
 relayWorkerChanges(hub, bus);
 const dispatcher = createDispatcher({ repos, hub, bus, log });
-const app = createApp({ repos, hub, dispatcher, bus });
+const alerting = createAlerting({ repos, hub, bus, notify: createTelegramNotifier(), log });
+const app = createApp({ repos, hub, dispatcher, alerting, bus });
 
 const server = app.listen(port, "0.0.0.0", () => {
   log(`listening on 0.0.0.0:${port}`);
 });
 hub.attach(server);
 dispatcher.reload();
+alerting.start();
 
 const local = ensureLocalWorker(repos);
 const supervisor = createSupervisor({
@@ -43,6 +47,7 @@ const shutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
   log(`${signal} received, stopping...`);
+  alerting.stop();
   await Promise.race([dispatcher.stop(), new Promise((r) => setTimeout(r, 5000))]);
   await supervisor.stop();
   await hub.close();

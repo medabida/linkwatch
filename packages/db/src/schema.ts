@@ -1,4 +1,4 @@
-import type { EngineStatus, NetworkInterfaceDto, WorkerMachineInfo } from "@linkwatch/shared";
+import type { AlertCondition, AlertScope, EngineStatus, NetworkInterfaceDto, WorkerMachineInfo } from "@linkwatch/shared";
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const workers = sqliteTable("workers", {
@@ -104,4 +104,51 @@ export const runs = sqliteTable(
     index("runs_target_started_idx").on(t.targetId, t.startedAt),
     index("runs_status_idx").on(t.status),
   ],
+);
+
+export const notificationChannels = sqliteTable("notification_channels", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  type: text("type", { enum: ["telegram"] }).notNull(),
+  config: text("config", { mode: "json" }).notNull().$type<{ botToken: string; chatId: string }>(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at").notNull(),
+  lastSentAt: integer("last_sent_at"),
+  lastError: text("last_error"),
+});
+
+export const alertRules = sqliteTable("alert_rules", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  severity: text("severity", { enum: ["warning", "critical"] }).notNull(),
+  scope: text("scope", { mode: "json" }).notNull().$type<AlertScope>(),
+  condition: text("condition", { mode: "json" }).notNull().$type<AlertCondition>(),
+  channelIds: text("channel_ids", { mode: "json" }).notNull().$type<number[]>(),
+  cooldownMinutes: integer("cooldown_minutes").notNull(),
+  renotifyMinutes: integer("renotify_minutes").notNull(),
+  notifyRecovery: integer("notify_recovery", { mode: "boolean" }).notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const alertEvents = sqliteTable(
+  "alert_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ruleId: integer("rule_id").references(() => alertRules.id, { onDelete: "set null" }),
+    ruleName: text("rule_name").notNull(),
+    severity: text("severity", { enum: ["warning", "critical"] }).notNull(),
+    subjectKind: text("subject_kind", { enum: ["target", "worker"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    subjectLabel: text("subject_label").notNull(),
+    message: text("message").notNull(),
+    value: real("value"),
+    state: text("state", { enum: ["firing", "resolved"] }).notNull(),
+    firedAt: integer("fired_at").notNull(),
+    resolvedAt: integer("resolved_at"),
+    acknowledgedAt: integer("acknowledged_at"),
+    notifiedAt: integer("notified_at"),
+  },
+  (t) => [index("alert_events_state_idx").on(t.state), index("alert_events_rule_subject_idx").on(t.ruleId, t.subjectId)],
 );

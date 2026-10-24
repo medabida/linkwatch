@@ -1,4 +1,14 @@
-import type { BIND_TYPES, DASHBOARD_METRICS, RUN_STATUSES, RUN_TRIGGERS, WORKER_KINDS } from "./constants.js";
+import type {
+  ALERT_SEVERITIES,
+  ALERT_TYPES,
+  BIND_TYPES,
+  CHANNEL_TYPES,
+  DASHBOARD_METRICS,
+  RUN_STATUSES,
+  RUN_TRIGGERS,
+  WORKER_KINDS,
+} from "./constants.js";
+import type { AlertCondition, AlertScope } from "./schemas.js";
 
 export type BindType = (typeof BIND_TYPES)[number];
 export type RunStatus = (typeof RUN_STATUSES)[number];
@@ -93,7 +103,7 @@ export interface RunsPage {
 
 export type EnginePhase = "connecting" | "ping" | "download" | "upload";
 
-export type RunEventType = "run_queued" | "run_started" | "run_progress" | "run_finished" | "worker_changed";
+export type RunEventType = "run_queued" | "run_started" | "run_progress" | "run_finished" | "worker_changed" | "alert_changed";
 
 export interface RunEventDto {
   id: number;
@@ -374,4 +384,55 @@ export interface QueueWaitingDto {
 export interface QueueDto {
   running: QueueRunningDto[];
   queued: QueueWaitingDto[];
+}
+
+export type AlertType = (typeof ALERT_TYPES)[number];
+export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];
+export type ChannelType = (typeof CHANNEL_TYPES)[number];
+
+export interface AlertRuleDto {
+  id: number;
+  name: string;
+  enabled: boolean;
+  severity: AlertSeverity;
+  scope: AlertScope;
+  condition: AlertCondition;
+  channelIds: number[];
+  cooldownMinutes: number;
+  renotifyMinutes: number;
+  notifyRecovery: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AlertEventDto {
+  id: number;
+  /** Null once the rule was deleted (the event keeps its snapshot). */
+  ruleId: number | null;
+  ruleName: string;
+  severity: AlertSeverity;
+  subjectKind: "target" | "worker";
+  subjectId: string;
+  subjectLabel: string;
+  message: string;
+  value: number | null;
+  state: "firing" | "resolved";
+  firedAt: number;
+  resolvedAt: number | null;
+  acknowledgedAt: number | null;
+  /** When the last notification for this alert was sent. */
+  notifiedAt: number | null;
+}
+
+/** A notification channel as shown in the UI: the bot token is never sent back, only a masked preview. */
+export interface ChannelDto {
+  id: number;
+  name: string;
+  type: ChannelType;
+  enabled: boolean;
+  chatId: string;
+  tokenPreview: string;
+  createdAt: number;
+  lastSentAt: number | null;
+  lastError: string | null;
 }

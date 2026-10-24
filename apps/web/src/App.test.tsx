@@ -37,6 +37,9 @@ const routes = {
   "GET /api/targets": () => [],
   "GET /api/runs": () => ({ rows: [], total: 0, page: 1, pageSize: 25 }),
   "GET /api/dashboard": () => emptyDashboard,
+  "GET /api/alerts/events": () => [],
+  "GET /api/alerts/rules": () => [],
+  "GET /api/alerts/channels": () => [],
   "GET /api/queue": () => ({ running: [], queued: [] }),
   "GET /api/settings": () => ({ parallelSites: true, parallelInterfaces: false }),
 };
@@ -48,7 +51,7 @@ describe("App", () => {
     mockApi(routes);
     renderWithProviders(<App />, "/history");
     expect(screen.getByText("LinkWatch")).toBeInTheDocument();
-    for (const name of ["Home", "History", "Workers", "Monitoring", "Settings"])
+    for (const name of ["Home", "History", "Workers", "Monitoring", "Alerting", "Settings"])
       expect(screen.getByRole("link", { name })).toBeInTheDocument();
   });
 
@@ -57,6 +60,7 @@ describe("App", () => {
     ["/history", "History"],
     ["/workers", "Workers"],
     ["/monitoring", "Monitoring"],
+    ["/alerting", "Alerting"],
     ["/settings", "Settings"],
   ])("renders %s", async (route, heading) => {
     mockApi(routes);

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  alertRuleInputSchema,
+  channelCreateSchema,
+  channelUpdateSchema,
   formatBps,
   runNowSchema,
   runsQuerySchema,
@@ -117,5 +120,46 @@ describe("formatBps edge cases", () => {
     expect(formatBps(0)).toBe("0.00 Mbps");
     expect(formatBps(999_990_000)).toBe("999.99 Mbps");
     expect(formatBps(1_000_000_000)).toBe("1.00 Gbps");
+  });
+});
+
+describe("alert schemas", () => {
+  const rule = { name: "Down", scope: { kind: "all" }, condition: { type: "test_failed", consecutive: "2" } };
+
+  it("applies defaults and coerces form strings", () => {
+    expect(alertRuleInputSchema.parse(rule)).toMatchObject({
+      enabled: true,
+      severity: "warning",
+      channelIds: [],
+      cooldownMinutes: 360,
+      renotifyMinutes: 0,
+      notifyRecovery: true,
+      condition: { consecutive: 2 },
+    });
+  });
+
+  it("validates each condition type and scope", () => {
+    const ok = (condition: unknown, scope: unknown = { kind: "all" }) =>
+      alertRuleInputSchema.safeParse({ ...rule, condition, scope }).success;
+    expect(ok({ type: "speed", metric: "downloadBps", mode: "baseline", threshold: 50, consecutive: 1 })).toBe(true);
+    expect(ok({ type: "speed", metric: "pingMs", mode: "baseline", threshold: 50, consecutive: 1 })).toBe(false);
+    expect(ok({ type: "latency", metric: "pingMs", thresholdMs: 0, consecutive: 1 })).toBe(false);
+    expect(ok({ type: "packet_loss", thresholdPct: 101, consecutive: 1 })).toBe(false);
+    expect(ok({ type: "ip_change" })).toBe(true);
+    expect(ok({ type: "stale", intervals: 0 })).toBe(false);
+    expect(ok({ type: "worker_offline", minutes: 10 }, { kind: "worker", workerId: "w1" })).toBe(true);
+    expect(ok({ type: "ip_change" }, { kind: "targets", targetIds: [] })).toBe(false);
+    expect(ok({ type: "ip_change" }, { kind: "site", site: "" })).toBe(false);
+    expect(alertRuleInputSchema.safeParse({ ...rule, extra: 1 }).success).toBe(false);
+  });
+
+  it("checks Telegram tokens and chat ids, and keeps the token optional on update", () => {
+    const c = { name: "tg", botToken: "123456:ABCDEFGHIJKLMNOPQRSTUV", chatId: "-1001234567890" };
+    expect(channelCreateSchema.safeParse(c).success).toBe(true);
+    expect(channelCreateSchema.safeParse({ ...c, chatId: "@mychannel" }).success).toBe(true);
+    expect(channelCreateSchema.safeParse({ ...c, botToken: "nope" }).success).toBe(false);
+    expect(channelCreateSchema.safeParse({ ...c, chatId: "abc" }).success).toBe(false);
+    expect(channelUpdateSchema.safeParse({ chatId: "42" }).success).toBe(true);
+    expect(channelUpdateSchema.safeParse({}).success).toBe(false);
   });
 });
