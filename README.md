@@ -14,7 +14,7 @@ npm start             # builds, then runs the master (API + UI + scheduler + loc
 # UI + API on http://localhost:3000  (API_PORT env var to change; see .env.example)
 ```
 
-Run in the background with pm2 instead: `npm run daemon` (build + start/restart `linkwatch-master`), `npm run daemon:logs`, `npm run daemon:stop`.
+Run in the background with pm2 instead: `npm run daemon` (build + start/restart `linkwatch-master`, which includes the local worker), `npm run daemon:logs`, `npm run daemon:stop`.
 
 On shutdown (Ctrl+C or SIGTERM) a running speed test is aborted, recorded as a failed run and not retried.
 
@@ -28,6 +28,23 @@ On shutdown (Ctrl+C or SIGTERM) a running speed test is aborted, recorded as a f
    After the first successful pairing the address and token are saved to `data/worker.json` (mode 0600), so later `pnpm worker` needs no arguments. Flags beat env vars (`MASTER_URL`, `WORKER_TOKEN`) which beat the saved file.
 4. Keep it running in the background with `npm run worker:daemon` (`worker:daemon:logs`, `worker:daemon:stop`; uses `ecosystem.worker.config.cjs`).
 5. Create interfaces for that worker in **Monitoring** (pick the worker first, then one of the interfaces it reported).
+
+### Machines with several NICs (e.g. one Proxmox LXC with one NIC per VLAN)
+Linux only installs one default route (the first gateway), so tests bound to the other interfaces fail with `Configuration - Couldn't connect to server (Network is unreachable)`. Each interface needs its own default route plus a source-IP rule. Run this once as root on the machine (it assumes each NIC sits on `10.<VLAN>.0.x/24` with the gateway at `10.<VLAN>.0.1`, and that `eth0` already has the normal default route; adapt the `cut -d. -f2` and `.1` parts otherwise). It installs a systemd service so the routes come back after a reboot:
+
+```sh
+printf '%s\n' '#!/bin/sh' 'sleep 3' 'ip -4 -o addr show scope global | while read -r _ dev _ cidr _; do' '  ip=${cidr%/*}; gw=${ip%.*}.1; t=$(echo $ip | cut -d. -f2)' '  ip route replace default via $gw dev $dev table $t onlink' '  ip rule show | grep -q "from $ip lookup $t" || ip rule add from $ip lookup $t' '  [ $dev = eth0 ] || ip route replace default via $gw dev $dev metric $t onlink' 'done' > /usr/local/sbin/multiwan.sh && chmod +x /usr/local/sbin/multiwan.sh && printf '[Unit]\nDescription=Per-interface default routes\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/local/sbin/multiwan.sh\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/multiwan.service && systemctl daemon-reload && systemctl enable --now multiwan
+```
+
+Check with `ip route` (a default per NIC, metrics 120, 130, ...), `ip rule` and `ping -I eth1 -c2 1.1.1.1`. If the gateway itself does not answer, the problem is the VLAN/bridge/router setup, not routing.
+
+### Home dashboard
+The **Home** page (`/`) shows charts built from the finished tests; **History** is unchanged. Everything is driven by the filters at the top and kept in the URL, so views can be bookmarked or shared:
+- **Range** (1 hour to 30 days, or custom), **worker**, **site**, **interfaces**, and a **statistic** (average, median, p95, min, max) used by the KPIs and the line charts.
+- **Compare with previous period** overlays the previous period of the same length (dashed lines) and adds a change indicator to each KPI.
+- Cards: KPIs, speed vs 7-day baseline, interface health (stale when an enabled interface has no successful test for 3 intervals), download and upload speed, ping (with a min to max band when one interface is selected), jitter, latency under load (bufferbloat), reliability, packet loss, outage timeline, interface comparison, download by hour of day, data usage per day, test server impact and external IP/ISP changes.
+- A test that was retried counts once (its last attempt). Failed tests count in reliability and the timeline but not in speed or latency statistics, and buckets without data are shown as gaps.
+- Data comes from `GET /api/dashboard?from=&to=&workerId=&site=&targetIds=1,2&tzOffsetMin=`, which buckets and aggregates on the master (about 240 buckets per chart). `tzOffsetMin` is the browser's timezone, used for day and hour-of-day grouping. The page refreshes when a test finishes and every 30 seconds.
 
 Development: `pnpm dev:master`, `pnpm dev:worker`, `pnpm dev:web` (Vite on :5173, proxying /api to :3000; run `pnpm build` once first so the workspace packages exist in `dist`).
 Quality: `pnpm test` (builds, then runs all Vitest suites), `pnpm lint`, `pnpm typecheck`. GitHub Actions (`.github/workflows/ci.yml`) runs lint, build, typecheck and tests on pushes to `main` and on every pull request. Requiring it to pass before merging is a branch-protection setting on GitHub and is not configured by the repo.
