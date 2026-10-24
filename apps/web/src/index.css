@@ -255,10 +255,6 @@ tr:last-child td {
   background: rgba(74, 163, 255, 0.1);
   border-color: var(--accent);
 }
-.live-row {
-  display: flex;
-  gap: 10px;
-}
 .modal-backdrop {
   position: fixed;
   inset: 0;
